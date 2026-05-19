@@ -58,12 +58,14 @@ export default function ProfilePage() {
     if (!session) return
     const load = async () => {
       try {
-        // Load base profile (shared table — only first_name, last_name, email)
-        const { data: profile } = await supabase
+        // Load FAT-authoritative identity profile.
+        // fat.profiles is auto-seeded by the on_auth_user_created_fat trigger,
+        // so a row exists for every authenticated user (use maybeSingle defensively).
+        const { data: profile } = await fat
           .from('profiles')
           .select('first_name, last_name')
           .eq('id', session.user.id)
-          .single()
+          .maybeSingle()
         if (profile) {
           setFirstName(profile.first_name || '')
           setLastName(profile.last_name || '')
@@ -112,10 +114,10 @@ export default function ProfilePage() {
     try {
       const stationLabel = stationId ? (stationName ? `FS${stationId} - ${stationName}` : `FS${stationId}`) : ''
 
-      // public.profiles is the shared cross-app table; email is NOT NULL and
-      // sourced from auth.users. Always include it in the upsert so the INSERT
-      // side of ON CONFLICT satisfies the constraint and stays auth-consistent.
-      const { error: profileError } = await supabase.from('profiles').upsert({
+      // fat.profiles is FAT-owned authoritative identity (mirrors mica.profiles).
+      // email is NOT NULL and sourced from auth.users; include it on every
+      // upsert so the INSERT side of ON CONFLICT stays auth-consistent.
+      const { error: profileError } = await fat.from('profiles').upsert({
         id: session.user.id,
         email: session.user.email,
         first_name: firstName.trim(),

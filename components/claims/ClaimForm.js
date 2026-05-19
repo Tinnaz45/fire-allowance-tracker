@@ -179,28 +179,72 @@ function AdjustedAmountField({ calculatedAmount, adjustedAmount, onChange }) {
   )
 }
 
+// ─── Resolved-station chip (mirrors profile selector badge) ──────────────────
+// Shown beneath each recall-form station input when parseAndResolve maps the
+// typed text onto a canonical fat.stations row. Gives the same visual
+// confirmation the Profile page's stationBadge gives, so the user knows the
+// downstream auto-distance flow will succeed.
+
+function ResolvedStationChip({ station }) {
+  if (!station) return null
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: '6px',
+      marginTop: '6px', padding: '4px 10px',
+      background: 'rgba(34,197,94,0.08)',
+      border: '1px solid rgba(34,197,94,0.3)',
+      borderRadius: '6px',
+      fontSize: '0.78rem', fontWeight: 600, color: '#4ade80',
+      letterSpacing: '0.02em',
+    }}>
+      <span aria-hidden="true">✓</span>
+      <span>{station.label || `FS${station.id}${station.name ? ' - ' + station.name : ''}`}</span>
+    </div>
+  )
+}
+
+function UnresolvedStationHint() {
+  return (
+    <div style={{
+      marginTop: '6px', padding: '4px 10px',
+      background: 'rgba(251,191,36,0.06)',
+      border: '1px solid rgba(251,191,36,0.25)',
+      borderRadius: '6px',
+      fontSize: '0.74rem', color: '#fbbf24',
+    }}>
+      Type a station number or name (e.g. &ldquo;FS44&rdquo; or &ldquo;Sunshine&rdquo;) to auto-resolve.
+    </div>
+  )
+}
+
 // ─── Sub-form: Recall ─────────────────────────────────────────────────────────
 
 function RecallInputs({ values, onChange, profile, profileLoading, userId, stations }) {
   const rosterLabel = profile?.stationLabel || ''
 
-  // Home → rostered-station leg: uses the profile station + cached home address.
-  const station = profile?.stationId
-    ? { id: profile.stationId, name: profile.stationName || profile.stationLabel || '', abbreviation: 'FS' + profile.stationId }
-    : null
-
-  // Rostered → recall-station leg: resolve free-text inputs against fat.stations.
+  // Resolve both free-text station inputs against fat.stations once per render.
   // The rostered station defaults to the profile station but can be edited; the
-  // recall station is always typed. Both feed RecallLegDistanceField for the
-  // second-leg auto distance. If either is unresolvable, the field falls back
-  // to a manual numeric input (existing behaviour preserved).
+  // recall station is always typed. Both feed:
+  //   - the resolved-station chips (visual confirmation that the typed text
+  //     mapped to a canonical FRV station, mirroring the Profile selector)
+  //   - the route-summary line (so it reflects what the user typed)
+  //   - StationDistanceField (home → rostered leg, keyed off rosterStation.id)
+  //   - RecallLegDistanceField (rostered → recall leg)
+  //
+  // Fallback for rosterStation: if `parseAndResolve` returns null because the
+  // stations list hasn't loaded yet OR the typed text is unparseable, fall back
+  // to the profile's persisted station so the home-leg estimate isn't blocked.
   const rosterStation = (() => {
     const parsed = parseAndResolve(values.rosteredStn, stations)
     if (parsed) return parsed
     if (profile?.stationId) {
+      const fallbackName =
+        profile.stationName ||
+        (profile.stationLabel || '').replace(/^FS\d+\s*[-–—]\s*/i, '').trim() ||
+        null
       return {
         id:           profile.stationId,
-        name:         (profile.stationLabel || '').replace(/^FS\d+\s*[-–—]\s*/i, '').trim() || null,
+        name:         fallbackName,
         abbreviation: `FS${profile.stationId}`,
         label:        profile.stationLabel || `FS${profile.stationId}`,
       }
@@ -210,6 +254,9 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
 
   const recallStation = parseAndResolve(values.recallStn, stations)
 
+  const rosterRouteLabel = rosterStation?.label || rosterLabel || 'Rostered Stn'
+  const recallRouteLabel = recallStation?.label || 'Recall Stn'
+
   return (
     <>
       <div style={{
@@ -218,7 +265,7 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
         fontSize: '0.8rem', color: '#9ca3af', lineHeight: 1.8,
       }}>
         <div style={{ fontWeight: 700, color: '#e5e7eb', marginBottom: '4px' }}>Recall Route</div>
-        <div>Home - {rosterLabel || 'Rostered Stn'} - Recall Stn - {rosterLabel || 'Rostered Stn'} - Home</div>
+        <div>Home - {rosterRouteLabel} - {recallRouteLabel} - {rosterRouteLabel} - Home</div>
       </div>
 
       <div style={FIELD}>
@@ -227,6 +274,9 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
           onChange={(e) => onChange('rosteredStn', e.target.value)}
           placeholder={rosterLabel || 'e.g. FS45 - Brooklyn'}
           style={INPUT_STYLE} />
+        {rosterStation && (
+          <ResolvedStationChip station={rosterStation} />
+        )}
         <p style={HELP_STYLE}>Auto-filled from your profile. Edit if different for this recall.</p>
       </div>
 
@@ -235,11 +285,17 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
         <input type="text" value={values.recallStn}
           onChange={(e) => onChange('recallStn', e.target.value)}
           placeholder="e.g. FS44 - Sunshine" style={INPUT_STYLE} />
+        {recallStation
+          ? <ResolvedStationChip station={recallStation} />
+          : (values.recallStn || '').trim()
+            ? <UnresolvedStationHint />
+            : null
+        }
       </div>
 
       <StationDistanceField
         userId={userId}
-        station={station}
+        station={rosterStation}
         homeAddress={profile?.homeAddress || ''}
         profileLoading={profileLoading}
         value={values.distHomeKm}

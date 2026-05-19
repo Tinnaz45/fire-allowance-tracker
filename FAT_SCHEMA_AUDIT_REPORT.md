@@ -1,8 +1,72 @@
 # FAT Schema Runtime Migration — Audit Report
 
-**Date:** 2026-05-15
-**Branch:** `claude/jovial-aryabhata-f9461c` (sourced from `dev`, intended for merge → `dev`)
-**Merge source:** `origin/claude/migrate-fat-schema-0ravY` (commit `cf2fdf9`)
+**Date:** 2026-05-19 (revision 2 — `fat.profiles` identity migration)
+**Branch:** `dev` (DEV-only; do not merge to `main`)
+**Earlier revision:** 2026-05-15 — initial `fat.*` schema move (commits `cf2fdf9` / `8efce33`).
+
+## Revision 2 — `fat.profiles` (this iteration)
+
+**Goal:** complete bounded-domain isolation by eliminating FAT's runtime
+dependency on `public.profiles`.
+
+| Item                                                | Status                          |
+| --------------------------------------------------- | ------------------------------- |
+| `fat.profiles` table + RLS + trigger (DEV)          | **Applied** (migration `fat_profiles_authoritative`) |
+| `on_auth_user_created_fat` trigger on `auth.users`  | **Created** (mirrors `on_auth_user_created_mica`) |
+| `fat.handle_new_user()` EXECUTE hardened            | **Yes** (revoked from `anon`/`authenticated`)    |
+| Backfill from `public.profiles`                     | **Completed** (1/1 rows on DEV) |
+| Runtime swap (`app/profile/page.js`)                | **Applied** — reads and writes use `fat.from('profiles')` |
+| `next build`                                        | **Succeeds** (compiled in ~3.4s, 14/14 pages)    |
+| Residual FAT-runtime refs to `public.*`             | **0** under `app/ components/ lib/` |
+| `supabase.from(...)` call sites (all schemas)       | **0** — only `supabase.auth.*` remains |
+| MICA trigger & objects                              | **Untouched**                   |
+| `public.profiles` row                               | **Untouched** (transitional debt) |
+| Rollback script                                     | [`supabase/prod-rollout/fat-profiles-rollback.sql`](supabase/prod-rollout/fat-profiles-rollback.sql) |
+
+### Per-domain client routing (revision 2)
+
+| Domain             | Client      | Reason                                                  |
+| ------------------ | ----------- | ------------------------------------------------------- |
+| auth (sign-in/up)  | `supabase`  | `auth.users` is the only acceptable shared resource     |
+| **`profiles`**     | **`fat`**   | **FAT-authoritative identity (was `public.profiles`)** |
+| `profile_ext`      | `fat`       | FAT operational extension (home, station, platoon)     |
+| every other table  | `fat`       | unchanged from revision 1                               |
+
+### Drift / backfill strategy
+
+* One-time backfill on DEV: `insert ... from auth.users left join public.profiles on id ...`.
+* New users from this point onward: seeded automatically by the
+  `on_auth_user_created_fat` trigger calling `fat.handle_new_user()`.
+* `public.profiles` is **no longer** read or written by FAT runtime. Cross-app
+  drift in `public.profiles.first_name/last_name` therefore cannot affect FAT.
+* No ongoing sync. `fat.profiles` is authoritative; `public.profiles` is dormant
+  from FAT's perspective.
+
+### Rollback sequencing
+
+1. **Code revert**: `git revert <commit>` undoing `app/profile/page.js` —
+   reverts to `public.profiles`. `fat.profiles` becomes dormant. Zero data loss.
+2. **DDL rollback** (only if needed): run
+   [`supabase/prod-rollout/fat-profiles-rollback.sql`](supabase/prod-rollout/fat-profiles-rollback.sql).
+   It drops `fat.profiles`, removes the FAT trigger from `auth.users`, drops
+   `fat.handle_new_user()`. **Never touches** `public.profiles`,
+   `public.handle_new_user`, or the MICA trigger.
+
+### What is explicitly NOT done in revision 2
+
+* No drop of `public.profiles` — per governance, it remains as transitional debt.
+* No change to MICA infrastructure (`mica.*`, `mica.handle_new_user`,
+  `on_auth_user_created_mica`).
+* No merge to `main`.
+* No PROD database touch.
+* No change to `fat.profile_ext` (operational data) — it stays as the extension
+  table beside the new authoritative `fat.profiles`.
+
+---
+
+## Revision 1 — initial `fat.*` schema move (2026-05-15)
+
+**Earlier merge source:** `origin/claude/migrate-fat-schema-0ravY` (commit `cf2fdf9`)
 **Merge method:** Cherry-pick onto `dev` HEAD (`092d988`) with manual conflict resolution.
 
 ---

@@ -123,7 +123,23 @@ create table if not exists fat.stations (
 );
 
 
--- ─── FAT-specific profile extension (per-user) ────────────────────────────────
+-- ─── Authoritative FAT identity profile (mirrors mica.profiles pattern) ──────
+-- fat.profiles owns FAT's identity surface (first/last name + email). Each
+-- row is auto-seeded by the on_auth_user_created_fat trigger below, so a FAT
+-- profile exists for every authenticated user without any client-side bootstrap.
+-- public.profiles is transitional cross-app debt and is NOT read by FAT runtime.
+
+create table if not exists fat.profiles (
+  id          uuid primary key references auth.users(id) on delete cascade,
+  email       text not null,
+  first_name  text not null default '',
+  last_name   text not null default '',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+
+-- ─── FAT-specific profile extension (per-user, operational data) ──────────────
 
 create table if not exists fat.profile_ext (
   user_id                uuid primary key references auth.users(id) on delete cascade,
@@ -353,6 +369,7 @@ create table if not exists fat.user_rates (
 
 create trigger set_updated_at before update on fat.claim_groups       for each row execute function fat.set_updated_at();
 create trigger set_updated_at before update on fat.stations           for each row execute function fat.set_updated_at();
+create trigger set_updated_at before update on fat.profiles           for each row execute function fat.set_updated_at();
 create trigger set_updated_at before update on fat.profile_ext        for each row execute function fat.set_updated_at();
 create trigger set_updated_at before update on fat.home_address       for each row execute function fat.set_updated_at();
 create trigger set_updated_at before update on fat.station_distances  for each row execute function fat.set_updated_at();
@@ -368,6 +385,7 @@ create trigger set_updated_at before update on fat.user_rates         for each r
 alter table fat.financial_years   enable row level security;
 alter table fat.claim_sequences   enable row level security;
 alter table fat.claim_groups      enable row level security;
+alter table fat.profiles          enable row level security;
 alter table fat.profile_ext       enable row level security;
 alter table fat.distance_cache    enable row level security;
 alter table fat.home_address      enable row level security;
@@ -382,6 +400,7 @@ alter table fat.stations          enable row level security;
 create policy users_manage_own on fat.financial_years   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy users_manage_own on fat.claim_sequences   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy users_manage_own on fat.claim_groups      for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy users_manage_own on fat.profiles          for all using (auth.uid() = id)      with check (auth.uid() = id);
 create policy users_manage_own on fat.profile_ext       for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy users_manage_own on fat.distance_cache    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy users_manage_own on fat.home_address      for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -397,6 +416,31 @@ create policy service_role_manage on fat.stations for all
   using (auth.role() = 'service_role') with check (auth.role() = 'service_role');
 
 
+-- ─── Auth.users → fat.profiles auto-seed (FAT-only trigger, parallel to MICA) ──
+-- Each app in the shared database adds its OWN trigger on auth.users so it can
+-- maintain its OWN authoritative profile row without any cross-app coupling.
+-- This trigger is independent of mica.handle_new_user / public.handle_new_user.
+
+create or replace function fat.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = fat, pg_catalog
+as $$
+begin
+  insert into fat.profiles (id, email)
+  values (new.id, new.email)
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created_fat on auth.users;
+create trigger on_auth_user_created_fat
+  after insert on auth.users
+  for each row execute function fat.handle_new_user();
+
+
 -- ─── Final grants ─────────────────────────────────────────────────────────────
 
 grant select, insert, update, delete on all tables    in schema fat to authenticated;
@@ -405,3 +449,8 @@ grant execute                        on all functions in schema fat to authentic
 grant all                            on all tables    in schema fat to service_role;
 grant all                            on all sequences in schema fat to service_role;
 grant all                            on all functions in schema fat to service_role;
+
+-- The bulk grant above intentionally hands authenticated EXECUTE on every fat
+-- function. Trigger-only functions are revoked here so they cannot be invoked
+-- via /rest/v1/rpc/*. Keep this block LAST in the file.
+revoke all on function fat.handle_new_user() from public, anon, authenticated;

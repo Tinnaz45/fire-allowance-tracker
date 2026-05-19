@@ -9,9 +9,9 @@
 
 | Schema   | Ownership                                                           |
 |----------|---------------------------------------------------------------------|
-| `auth`   | Supabase-managed authentication (do not touch).                     |
-| `public` | Cross-app shared resources only (`profiles`, other tenants' tables).|
-| `fat`    | **Everything Fire Allowance Tracker owns.**                          |
+| `auth`   | Supabase-managed authentication (do not touch). Only shared resource. |
+| `public` | Transitional cross-app debt — **not** read or written by FAT runtime. |
+| `fat`    | **Everything Fire Allowance Tracker owns**, including identity (`fat.profiles`). |
 
 The Supabase project hosts multiple apps in one database (FAT, MICA,
 CAB, …). The `fat` schema is the FAT app boundary.
@@ -28,7 +28,8 @@ All in the `fat` schema:
 | `fat.claim_sequences`     | Atomic per-FY, per-claim-type sequence counters.              |
 | `fat.claim_groups`        | Parent claim group rows (one per user-initiated claim).       |
 | `fat.stations`            | Station reference data (48 rows seed; read-only for users).   |
-| `fat.profile_ext`         | FAT-specific per-user profile (station, platoon, address …).  |
+| `fat.profiles`            | **Authoritative FAT identity** (first/last name + email).     |
+| `fat.profile_ext`         | FAT operational profile (station, platoon, address …).        |
 | `fat.distance_cache`      | v1 per-user home→station distance cache.                      |
 | `fat.home_address`        | v4 geocoded home address (one row per user).                  |
 | `fat.station_distances`   | v4 user-specific home→station distance estimates.             |
@@ -44,6 +45,7 @@ All in the `fat` schema:
 |----------------------------------------------------------------|--------------------------------------------------------|
 | `fat.set_updated_at()`                                         | Trigger function bumping `updated_at` on UPDATE.       |
 | `fat.increment_claim_sequence(user_id, fy_id, claim_type)`     | Atomic next-claim-number issuer (RPC).                 |
+| `fat.handle_new_user()`                                        | `SECURITY DEFINER` seeder for `fat.profiles` on `auth.users` insert. |
 
 ### Triggers
 
@@ -63,10 +65,16 @@ RLS is enabled on every FAT table.
 
 | Resource           | Notes                                                                    |
 |--------------------|--------------------------------------------------------------------------|
-| `auth.users`       | Supabase auth source-of-truth for `user_id` FKs.                         |
-| `public.profiles`  | Shared cross-app profile (first/last name). FAT-specific fields live in `fat.profile_ext`. |
+| `auth.users`       | Supabase auth source-of-truth for `user_id` FKs. **Only** shared resource. |
 
-Nothing else in `public` is touched by FAT.
+FAT owns the `on_auth_user_created_fat` trigger on `auth.users`, which runs
+`fat.handle_new_user()` to seed a `fat.profiles` row for every new user. This
+mirrors MICA's `on_auth_user_created_mica` trigger — the two are independent
+and cannot interfere with each other.
+
+`public.profiles` is **not** read or written by FAT runtime as of this
+migration. It remains in place as transitional cross-app debt and will be
+detached separately.
 
 ## Naming conventions
 
@@ -85,10 +93,11 @@ All FAT queries go through a schema-scoped Supabase client:
 ```js
 import { supabase, fat } from '@/lib/supabaseClient'
 
-// Auth + cross-app tables — public schema
-await supabase.from('profiles').select(...)
+// Auth only — public/auth schemas
+await supabase.auth.getSession()
 
 // Every FAT table — fat schema, no fat_ prefix on names
+await fat.from('profiles').select(...)
 await fat.from('claim_groups').select(...)
 await fat.from('spoilt_meals').insert(...)
 await fat.rpc('increment_claim_sequence', { ... })

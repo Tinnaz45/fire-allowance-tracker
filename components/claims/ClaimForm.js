@@ -367,8 +367,9 @@ function RetainInputs({ values, onChange, mealEligibility }) {
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Booked Off Time (24hr)</label>
-        <input type="time" value={values.bookedOffTime}
-          onChange={(e) => onChange('bookedOffTime', e.target.value)}
+        <input type="time" value={(values.bookedOffTime || '').slice(0, 5)}
+          onChange={(e) => onChange('bookedOffTime', (e.target.value || '').slice(0, 5))}
+          step="60"
           style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
         {mealEligibility?.thresholds && (
           <p style={HELP_STYLE}>

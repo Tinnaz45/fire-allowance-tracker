@@ -22,12 +22,14 @@ import { parseAndResolve } from '@/lib/distance/stationParser'
 import {
   calcRecallClaim,
   calcRetainClaim,
+  calcRetainMealEligibility,
   calcStandbyClaim,
   calcSpoiltClaim,
   isStandbyNightMealEligible,
   getMealWindow,
   checkTimeInMealWindow,
   buildRecallCalcLines,
+  buildRetainCalcLines,
   buildStandbyCalcLines,
   buildSpoiltCalcLines,
   buildCalcSnapshot,
@@ -112,7 +114,7 @@ function CalcPreview({ breakdown, rates, onShowCalc }) {
   if (breakdown.travelAmount > 0)  lines.push('Travel: $' + breakdown.travelAmount.toFixed(2) + (breakdown.totalKm != null ? ' (' + breakdown.totalKm + ' km x $' + (rates.kilometreRate?.toFixed(2) || '0.99') + ')' : ''))
   if (breakdown.mealieAmount > 0)  lines.push('Meal allowance: $' + breakdown.mealieAmount.toFixed(2))
   if (breakdown.nightMealie > 0)   lines.push('Night meal: $' + breakdown.nightMealie.toFixed(2))
-  if (breakdown.mealAmount > 0)    lines.push('Meal allowance: $' + breakdown.mealAmount.toFixed(2))
+  if (breakdown.mealAmount > 0)    lines.push((breakdown.mealLabel ? breakdown.mealLabel + ': ' : 'Meal allowance: ') + '$' + breakdown.mealAmount.toFixed(2))
   if (breakdown.retainAmount > 0)  lines.push('Retain: $' + breakdown.retainAmount.toFixed(2))
   if (breakdown.overnightCash > 0) lines.push('Overnight: $' + breakdown.overnightCash.toFixed(2))
 
@@ -344,9 +346,45 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
 
 // ─── Sub-form: Retain ─────────────────────────────────────────────────────────
 
-function RetainInputs({ values, onChange }) {
+function RetainInputs({ values, onChange, mealEligibility }) {
+  const eligTier = mealEligibility?.tier || 'none'
+  const eligColor = eligTier === 'none' ? '#9ca3af' : '#4ade80'
+  const eligBg    = eligTier === 'none' ? 'rgba(107,114,128,0.08)' : 'rgba(34,197,94,0.08)'
+  const eligBorder= eligTier === 'none' ? 'rgba(107,114,128,0.3)' : 'rgba(34,197,94,0.3)'
+
   return (
     <>
+      <div style={FIELD}>
+        <label style={LABEL_STYLE}>Shift Type</label>
+        <select value={values.shift}
+          onChange={(e) => onChange('shift', e.target.value)}
+          style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+          <option value="Day">Day Shift</option>
+          <option value="Night">Night Shift</option>
+        </select>
+        <p style={HELP_STYLE}>Which shift was the retain attached to?</p>
+      </div>
+
+      <div style={FIELD}>
+        <label style={LABEL_STYLE}>Booked Off Time (24hr)</label>
+        <input type="time" value={values.bookedOffTime}
+          onChange={(e) => onChange('bookedOffTime', e.target.value)}
+          style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
+        {mealEligibility?.thresholds && (
+          <p style={HELP_STYLE}>
+            {values.shift} thresholds: Large meal after {mealEligibility.thresholds.large},
+            + Small meal after {mealEligibility.thresholds.smallAdditional}.
+          </p>
+        )}
+        <div style={{
+          marginTop: '8px', padding: '8px 12px', borderRadius: '6px',
+          background: eligBg, border: '1px solid ' + eligBorder,
+          color: eligColor, fontSize: '0.82rem', fontWeight: 600,
+        }}>
+          {mealEligibility?.label || 'Enter shift + booked off time to determine meal eligibility'}
+        </div>
+      </div>
+
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Retain Allowance ($) - Maint stn N/N</label>
         <input type="number" min="0" step="0.01" placeholder="0.00"
@@ -564,7 +602,7 @@ function SpoiltInputs({ values, onChange, claimType }) {
 
 const DEFAULTS = {
   recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
-  retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '' },
+  retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '', shift: 'Day', bookedOffTime: '' },
   standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '', payslipPayNbr: '' },
   spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
   delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
@@ -706,7 +744,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         result = calcRetainClaim({
           retainAmount:  num(fields.retainAmount),
           overnightCash: num(fields.overnightCash),
-        })
+          shift:         fields.shift,
+          bookedOffTime: fields.bookedOffTime,
+        }, rates)
       } else if (claimType === 'standby') {
         const hasNightMeal = isStandbyNightMealEligible({
           standbyType: fields.standbyType,
@@ -751,13 +791,13 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         incidentTime: fields.incidentTime, mealInterrupted: fields.mealInterrupted,
         returnToStn: fields.returnToStn,
       }, rates)
-    } else if (breakdown) {
-      lines = [
-        '-- Retain --',
-        'Retain allowance: $' + breakdown.retainAmount.toFixed(2),
-        breakdown.overnightCash > 0 ? 'Overnight cash: $' + breakdown.overnightCash.toFixed(2) : '',
-        '-- Total: $' + breakdown.totalAmount.toFixed(2) + ' --',
-      ].filter(Boolean)
+    } else if (claimType === 'retain') {
+      lines = buildRetainCalcLines({
+        retainAmount:  num(fields.retainAmount),
+        overnightCash: num(fields.overnightCash),
+        shift:         fields.shift,
+        bookedOffTime: fields.bookedOffTime,
+      }, rates)
     }
     setShowCalcLines(lines)
   }
@@ -791,6 +831,11 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     } else if (claimType === 'delayed_meal') {
       calcLines = buildSpoiltCalcLines(
         { mealType: 'Delayed', shift: fields.shift, incidentTime: fields.incidentTime, mealInterrupted: fields.mealInterrupted, returnToStn: fields.returnToStn },
+        rates
+      )
+    } else if (claimType === 'retain') {
+      calcLines = buildRetainCalcLines(
+        { retainAmount: num(fields.retainAmount), overnightCash: num(fields.overnightCash), shift: fields.shift, bookedOffTime: fields.bookedOffTime },
         rates
       )
     }
@@ -863,7 +908,13 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       </div>
 
       {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} />}
-      {claimType === 'retain'       && <RetainInputs  values={fields} onChange={handleFieldChange} />}
+      {claimType === 'retain'       && (
+        <RetainInputs
+          values={fields}
+          onChange={handleFieldChange}
+          mealEligibility={calcRetainMealEligibility({ shift: fields.shift, bookedOffTime: fields.bookedOffTime })}
+        />
+      )}
       {claimType === 'standby'      && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
       {(claimType === 'spoilt' || claimType === 'delayed_meal') && (
         <SpoiltInputs values={fields} onChange={handleFieldChange} claimType={claimType} />

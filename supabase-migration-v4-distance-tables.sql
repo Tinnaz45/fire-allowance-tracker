@@ -1,3 +1,24 @@
+-- ███████████████████████████████████████████████████████████████████████████████
+-- ██                                                                           ██
+-- ██  ⚠️  SUPERSEDED — HISTORICAL ONLY — DO NOT REPLAY  ⚠️                     ██
+-- ██                                                                           ██
+-- ██  This file is OBSOLETE. It is retained for rollout/audit history only.    ██
+-- ██                                                                           ██
+-- ██  CANONICAL ARCHITECTURE:                                                  ██
+-- ██    • fat.* bounded-domain schema is canonical.                            ██
+-- ██    • supabase/fat-schema.sql is the AUTHORITATIVE schema definition.      ██
+-- ██    • The legacy public.fat_* flat layout below is OBSOLETE.               ██
+-- ██                                                                           ██
+-- ██  REPLAY RISK:                                                             ██
+-- ██    Replaying this file may FAIL because public.fat_set_updated_at()       ██
+-- ██    no longer exists. Triggers reference a function that has been removed  ██
+-- ██    as part of the fat.* bounded-domain migration.                         ██
+-- ██                                                                           ██
+-- ██  DO NOT execute this file against any environment (dev, staging, prod).   ██
+-- ██  For schema changes, modify supabase/fat-schema.sql instead.              ██
+-- ██                                                                           ██
+-- ███████████████████████████████████████████████████████████████████████████████
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- FIRE ALLOWANCE TRACKER — MIGRATION v4: DISTANCE ESTIMATION & CACHING TABLES
 -- File: supabase-migration-v4-distance-tables.sql

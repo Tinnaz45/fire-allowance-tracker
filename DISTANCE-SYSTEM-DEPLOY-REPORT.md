@@ -1,3 +1,16 @@
+> # ⚠️ HISTORICAL DOCUMENT — DO NOT USE AS CURRENT REFERENCE
+>
+> **This document is HISTORICAL and predates the fat.* bounded-domain migration.**
+>
+> - All references to `public.fat_*` tables in this document are **OBSOLETE**.
+> - The current canonical architecture uses the **`fat.*` bounded-domain schema**.
+> - **`supabase/fat-schema.sql` is the authoritative schema definition.**
+> - This document is retained **for rollout/audit history only**.
+> - Do not rely on table names, schema details, or deployment steps below as a
+>   description of current runtime state.
+
+---
+
 # Distance Estimation System — DEV Deploy Report
 **Date:** 2026-05-14  
 **Branch:** dev  

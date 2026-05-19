@@ -17,6 +17,7 @@ import { useRates } from '@/lib/calculations/RatesContext'
 import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import StationDistanceField from '@/components/distance/StationDistanceField'
 import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField'
+import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
 import { parseAndResolve } from '@/lib/distance/stationParser'
 import {
   calcRecallClaim,
@@ -219,7 +220,7 @@ function UnresolvedStationHint() {
 
 // ─── Sub-form: Recall ─────────────────────────────────────────────────────────
 
-function RecallInputs({ values, onChange, profile, profileLoading, userId, stations }) {
+function RecallInputs({ values, onChange, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta }) {
   const rosterLabel = profile?.stationLabel || ''
 
   // Resolve both free-text station inputs against fat.stations once per render.
@@ -300,6 +301,7 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
         profileLoading={profileLoading}
         value={values.distHomeKm}
         onChange={(v) => onChange('distHomeKm', v)}
+        onRoutingMeta={onHomeLegMeta}
       />
 
       <RecallLegDistanceField
@@ -308,6 +310,7 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
         destStation={recallStation}
         value={values.distStnKm}
         onChange={(km) => onChange('distStnKm', km)}
+        onRoutingMeta={onStnLegMeta}
       />
 
       <div style={FIELD}>
@@ -371,7 +374,26 @@ function RetainInputs({ values, onChange }) {
 
 // ─── Sub-form: Standby ────────────────────────────────────────────────────────
 
-function StandbyInputs({ values, onChange, nightMealEligible }) {
+function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, stations, onStandbyMeta }) {
+  // Resolve rostered + standby stations from the profile / typed text. Mirrors
+  // the Recall flow so the user gets the same chip feedback + auto-distance UX.
+  const rosterStation = (() => {
+    if (profile?.stationId) {
+      const fallbackName =
+        profile.stationName ||
+        (profile.stationLabel || '').replace(/^FS\d+\s*[-–—]\s*/i, '').trim() ||
+        null
+      return {
+        id:           profile.stationId,
+        name:         fallbackName,
+        abbreviation: `FS${profile.stationId}`,
+        label:        profile.stationLabel || `FS${profile.stationId}`,
+      }
+    }
+    return null
+  })()
+  const standbyStation = parseAndResolve(values.standbyStn, stations)
+
   return (
     <>
       <div style={FIELD}>
@@ -385,13 +407,27 @@ function StandbyInputs({ values, onChange, nightMealEligible }) {
       </div>
 
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Distance - return km total</label>
-        <input type="number" min="0" step="0.1" placeholder="0.0"
-          value={values.distKm}
-          onChange={(e) => onChange('distKm', e.target.value)}
-          style={INPUT_STYLE} />
-        <p style={HELP_STYLE}>Enter the total return km (both legs combined).</p>
+        <label style={LABEL_STYLE}>Standby / M&D Station</label>
+        <input type="text" value={values.standbyStn || ''}
+          onChange={(e) => onChange('standbyStn', e.target.value)}
+          placeholder="e.g. FS44 - Sunshine" style={INPUT_STYLE} />
+        {standbyStation
+          ? <ResolvedStationChip station={standbyStation} />
+          : (values.standbyStn || '').trim()
+            ? <UnresolvedStationHint />
+            : null
+        }
+        <p style={HELP_STYLE}>Used for Google KM + FRV matrix hours lookup. Leave blank to enter km manually.</p>
       </div>
+
+      <StandbyDistanceField
+        userId={userId}
+        rosterStation={rosterStation}
+        standbyStation={standbyStation}
+        value={values.distKm}
+        onChange={(km) => onChange('distKm', km)}
+        onRoutingMeta={onStandbyMeta}
+      />
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Shift</label>
@@ -529,7 +565,7 @@ function SpoiltInputs({ values, onChange, claimType }) {
 const DEFAULTS = {
   recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
   retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '' },
-  standby:      { standbyType: 'Standby', distKm: '', shift: 'Day', arrivedTime: '', payslipPayNbr: '' },
+  standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '', payslipPayNbr: '' },
   spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
   delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
 }
@@ -561,6 +597,14 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
   const [profile, setProfile]               = useState(null)
   const [profileLoading, setProfileLoading] = useState(true)
   const [stations, setStations]             = useState([])
+
+  // Routing provenance — captured per-leg from the distance fields so the
+  // submitted claim row carries Google KM, matrix hours, and source labels
+  // for later reproduction. These are populated by onRoutingMeta callbacks
+  // and reset whenever the claim type changes.
+  const [recallHomeMeta,    setRecallHomeMeta]    = useState(null)
+  const [recallStnMeta,     setRecallStnMeta]     = useState(null)
+  const [standbyTravelMeta, setStandbyTravelMeta] = useState(null)
 
   // Load FAT-specific profile extension for pre-fill
   // Reads from fat.profile_ext (FAT-owned) - not the shared profiles table
@@ -642,6 +686,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     setAdjustedAmount(null)
     setShowCalcLines(null)
     setError(null)
+    setRecallHomeMeta(null)
+    setRecallStnMeta(null)
+    setStandbyTravelMeta(null)
   }, [claimType, profile])
 
   // Auto-calculate on field/rate change
@@ -756,6 +803,15 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       calcSnapshot: buildCalcSnapshot(claimType, calcLines, rates),
     }
 
+    // Routing provenance, only relevant for claim types that auto-calculate
+    // a distance. Persisted by ClaimsContext into the new additive columns
+    // (google_km_*, matrix_hours, routing_source, travel_calc_at).
+    const routingMeta = claimType === 'recalls'
+      ? { home: recallHomeMeta, stn: recallStnMeta }
+      : claimType === 'standby'
+        ? { standby: standbyTravelMeta }
+        : null
+
     setSubmitting(true)
     try {
       await addClaim({
@@ -765,6 +821,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         breakdown: enrichedBreakdown,
         fields,
         rates,
+        routingMeta,
         financialYearId: financialYearId || null,
       })
       onSuccess?.()
@@ -805,9 +862,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
       </div>
 
-      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} />}
+      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} />}
       {claimType === 'retain'       && <RetainInputs  values={fields} onChange={handleFieldChange} />}
-      {claimType === 'standby'      && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} />}
+      {claimType === 'standby'      && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
       {(claimType === 'spoilt' || claimType === 'delayed_meal') && (
         <SpoiltInputs values={fields} onChange={handleFieldChange} claimType={claimType} />
       )}

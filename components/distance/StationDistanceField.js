@@ -84,6 +84,21 @@ const BANNER_BASE = {
   fontSize: '0.78rem', lineHeight: 1.5, marginBottom: '8px',
 }
 
+// Map the routing-provider discriminator returned by resolveDistance /
+// recalculateDistance into human-readable banner copy. Keep tightly aligned
+// with the source values produced by app/api/travel/google/route.js and the
+// catch-branch fallback in lib/distance/distanceEstimator.js.
+function describeRouteSource(source) {
+  switch (source) {
+    case 'google':         return 'via Google Maps routing (avoid tolls, shortest distance)'
+    case 'osrm-fallback':  return 'via OpenStreetMap routing — Google Maps unavailable, used fallback'
+    case 'osrm':           return 'via OpenStreetMap routing (direct fallback)'
+    case 'cached':
+    case 'auto':           return 'using a previously saved estimate'
+    default:               return 'via driving-route estimate'
+  }
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function StationDistanceField({
@@ -93,13 +108,23 @@ export default function StationDistanceField({
   profileLoading,    // true while parent is still loading profile
   value,             // numeric value held by the parent (string, like other ClaimForm inputs)
   onChange,          // (newValueString) => void — emitted on accept / save / manual edit
+  onRoutingMeta,     // optional ({ source, km, calculatedAt }) → void — routing provenance for persistence
 }) {
+  const emitMeta = (km, source) => {
+    if (typeof onRoutingMeta === 'function') {
+      onRoutingMeta({ source, km: Number(km), calculatedAt: new Date().toISOString() })
+    }
+  }
   const [phase,   setPhase]   = useState(PHASE.IDLE)
   const [estKm,   setEstKm]   = useState(null)
   const [editing, setEditing] = useState(false)
   const [draft,   setDraft]   = useState('')           // free-text edit buffer
   const [error,   setError]   = useState(null)
   const [staleReason, setStaleReason] = useState(null)
+  // Routing provenance for the visible banner. Mirrors what is plumbed to
+  // emitMeta / persisted. Without this the banner would always read the
+  // historical "OpenStreetMap" copy even when Google succeeded server-side.
+  const [routeSource, setRouteSource] = useState(null)
 
   // In-flight guard: each effect run gets a fresh token; if the token has
   // changed by the time the promise resolves, we discard the result.
@@ -140,12 +165,16 @@ export default function StationDistanceField({
         if (tokenRef.current !== myToken) return
         if (result.phase === PHASE.CONFIRMED) {
           setEstKm(result.km)
+          setRouteSource(result.source || 'cached')
           setPhase(PHASE.CONFIRMED)
           // Sync parent input with the cached confirmed value.
           onChange?.(String(result.km))
+          emitMeta(result.km, result.source || 'cached')
         } else if (result.phase === PHASE.ESTIMATE) {
           setEstKm(result.km)
+          setRouteSource(result.source || 'google')
           setPhase(PHASE.ESTIMATE)
+          emitMeta(result.km, result.source || 'google')
         } else if (result.phase === PHASE.STALE) {
           setEstKm(result.km)
           setStaleReason(result.reason)
@@ -190,6 +219,7 @@ export default function StationDistanceField({
       await persistConfirmed(estKm, 'auto')
       onChange?.(String(estKm))
       setPhase(PHASE.CONFIRMED)
+      emitMeta(estKm, 'google')
     } catch (err) {
       console.error('[StationDistanceField] accept:', err)
       setError(err.message || 'Could not save confirmed distance.')
@@ -214,6 +244,7 @@ export default function StationDistanceField({
       setEstKm(km)
       setEditing(false)
       setPhase(PHASE.CONFIRMED)
+      emitMeta(km, 'manual')
     } catch (err) {
       console.error('[StationDistanceField] manual save:', err)
       setError(err.message || 'Could not save distance.')
@@ -235,8 +266,10 @@ export default function StationDistanceField({
       const result = await recalculateDistance(userId, station, homeAddress)
       if (tokenRef.current !== myToken) return
       setEstKm(result.km)
+      setRouteSource(result.source || 'google')
       setStaleReason(null)
       setPhase(PHASE.ESTIMATE)
+      emitMeta(result.km, result.source || 'google')
     } catch (err) {
       if (tokenRef.current !== myToken) return
       console.error('[StationDistanceField] recalculate:', err)
@@ -317,7 +350,7 @@ export default function StationDistanceField({
             border: '1px solid rgba(251,191,36,0.3)',
             color: '#fbbf24',
           }}>
-            Estimated <strong>{estKm} km</strong> (one way) via OpenStreetMap routing.
+            Estimated <strong>{estKm} km</strong> (one way) {describeRouteSource(routeSource)}.
             Please confirm or edit — this is a best-effort estimate and may not match
             your actual route.
           </div>

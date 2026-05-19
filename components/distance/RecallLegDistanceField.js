@@ -1,36 +1,44 @@
 'use client'
 
 // ─── RecallLegDistanceField ──────────────────────────────────────────────────
-// Auto-calculates the "Rostered to Recall Station (one way, km)" distance.
+// Auto-fills the "Rostered to Recall Station (one way, km)" distance from the
+// official FRV "Index (KM)" lookup table — never from a live routing provider.
 //
-// Mirrors the UX of StationDistanceField (used for Home → Rostered Station)
-// but for the second leg of the recall route. Computes a driving distance via
-// the existing Nominatim + OSRM stack, with in-memory session caching to
-// dedupe repeat lookups and prevent duplicate station parsing issues.
+// This is a deterministic lookup against fat.travel_matrix_versions /
+// fat.travel_matrix_cells (active KM version). The previous implementation
+// derived this leg from Google Maps / OSRM, which produced non-deterministic
+// distances that did not match the indexed allowance calculation. We now read
+// the canonical FRV value so claim totals match payroll exactly.
 //
 // Behaviour:
-//   1. Same station for both rostered + recall → auto-set 0 km (operational
-//      rule: "Leave 0 if recalled to your own rostered station").
-//   2. Both stations resolvable → trigger estimate, show Accept / Edit / Retry.
-//   3. Recall input is empty or unparseable → fall back to manual numeric entry
-//      so the existing claim workflow is never blocked.
-//   4. API failure → show error, keep manual entry available.
+//   1. Same station for both rostered + recall → 0 km (operational rule:
+//      "Leave 0 if recalled to your own rostered station").
+//   2. Both stations resolvable AND an indexed cell exists → surface the
+//      indexed KM value with Accept / Edit / Recalculate (re-reads the index).
+//   3. Recall input empty / unparseable → manual numeric entry.
+//   4. Indexed cell is missing for the pair → controlled "no indexed match"
+//      warning + manual entry. NO silent fallback to routing APIs.
+//   5. Network failure reading the index → error state, manual entry usable.
 //
-// This component is purely additive — existing claim calculation behaviour is
-// preserved when the auto-flow falls through to manual input. The value it
-// surfaces to its parent is always written into form.distStnKm just like the
-// previous manual input did, so calcRecallClaim continues to drive totals.
+// The value surfaced to the parent is still written into form.distStnKm so
+// calcRecallClaim continues to drive totals unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef } from 'react'
-import { getStationToStationDistance } from '@/lib/distance/stationDistance'
+import { lookupMatrixKm, getActiveMatrixVersion } from '@/lib/distance/matrix/matrixClient'
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const DISCLAIMER_TEXT =
-  'Distance estimates are automatically calculated using mapping services and ' +
-  'may not reflect actual operational travel routes. You are responsible for ' +
-  'verifying the accuracy of all entered distances before submitting claims.'
+  'Distance is read from the official FRV Index (KM) lookup table for this ' +
+  'station pair. It is deterministic and matches the indexed allowance ' +
+  'calculation — but you remain responsible for verifying the value before ' +
+  'submitting the claim.'
+
+const NO_INDEX_TEXT =
+  'No indexed KM value is recorded for this station pair in the active FRV ' +
+  'Index (KM) matrix. Enter the distance manually. The recall claim total is ' +
+  'still produced from the value you enter below.'
 
 // ── Styles (kept inline to match the rest of ClaimForm) ─────────────────────
 
@@ -111,14 +119,28 @@ export default function RecallLegDistanceField({
   destStation,
   value,
   onChange,
+  onRoutingMeta,
   label = 'Rostered to Recall Station (one way, km)',
 }) {
+  const emitMeta = (km, source, versionId, versionLbl) => {
+    if (typeof onRoutingMeta === 'function') {
+      onRoutingMeta({
+        source,
+        km: Number(km),
+        matrixVersionId:  versionId || null,
+        matrixVersionLbl: versionLbl || null,
+        calculatedAt:     new Date().toISOString(),
+      })
+    }
+  }
   // ── State ────────────────────────────────────────────────────────────────
-  // phases: idle | loading | show_estimate | confirmed | editing | error | manual
+  // phases: idle | loading | show_estimate | confirmed | editing |
+  //         no_index | error | manual
   const [phase, setPhase]           = useState('idle')
   const [estimatedKm, setEstimatedKm] = useState(null)
   const [editValue, setEditValue]   = useState('')
   const [errorMsg, setErrorMsg]     = useState(null)
+  const [versionLabel, setVersionLabel] = useState(null)
 
   // Tracks the most recent pair the form intends to estimate. Async callers
   // check this on resolution to bail out if a newer pair has superseded them
@@ -153,16 +175,18 @@ export default function RecallLegDistanceField({
       onChange('0')
       appliedPair.current = key
       setEstimatedKm(0)
+      setVersionLabel(null)
       setPhase('confirmed')
+      emitMeta(0, 'self')
       return
     }
 
-    // Different stations — trigger estimate
-    triggerEstimate(originStation, destStation, false)
+    // Different stations — read from the FRV Index (KM) matrix
+    triggerLookup(originStation, destStation)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [originStation?.id, destStation?.id])
 
-  async function triggerEstimate(origin, dest, forceRecalc) {
+  async function triggerLookup(origin, dest) {
     if (!origin || !dest) return
     const key = `${origin.id}:${dest.id}`
     latestKey.current = key
@@ -171,31 +195,36 @@ export default function RecallLegDistanceField({
     setErrorMsg(null)
 
     try {
-      const { distanceKm } = await getStationToStationDistance({
-        userId,
-        originStationId: origin.id,
-        originName:      origin.name,
-        originLabel:     origin.label,
-        destStationId:   dest.id,
-        destName:        dest.name,
-        destLabel:       dest.label,
-        forceRecalc,
-      })
+      const result = await lookupMatrixKm(origin.id, dest.id)
 
-      // The user may have switched the recall station before the API returned
-      // — only apply if this estimate is still relevant.
+      // The user may have switched the recall station before the lookup
+      // returned — only apply if this result is still relevant.
       if (latestKey.current !== key) return
 
-      setEstimatedKm(distanceKm)
-      // Surface the estimate immediately. The user can still edit/override
-      // via the inline input, and the form value flows into the recall total
-      // through the standard distStnKm onChange.
-      onChange(String(distanceKm))
+      if (result == null) {
+        // No cell for this pair in the active KM matrix. Controlled warning
+        // state — manual entry only, NO silent fallback to a routing API.
+        const fallbackVersion = await getActiveMatrixVersion()
+        if (latestKey.current !== key) return
+        setVersionLabel(fallbackVersion?.label || null)
+        setEstimatedKm(null)
+        setPhase('no_index')
+        return
+      }
+
+      const km = Number(result.value)
+      setEstimatedKm(km)
+      setVersionLabel(result.versionLabel || null)
+      // Surface the indexed value immediately. The user can still edit /
+      // override via the inline input, and the form value flows into the
+      // recall total through the standard distStnKm onChange.
+      onChange(String(km))
       appliedPair.current = key
       setPhase('show_estimate')
+      emitMeta(km, 'index_km', result.versionId, result.versionLabel)
     } catch (err) {
       if (latestKey.current !== key) return
-      setErrorMsg(err?.message || 'Could not calculate distance. Please enter manually.')
+      setErrorMsg(err?.message || 'Could not read indexed distance. Please enter manually.')
       setPhase('error')
     }
   }
@@ -216,14 +245,17 @@ export default function RecallLegDistanceField({
     if (editValue === '' || isNaN(km) || km < 0) return // invalid — stay in editing
     onChange(String(km))
     setPhase('confirmed')
+    emitMeta(km, 'manual')
   }
 
   function handleCancelEdit() {
-    setPhase(estimatedKm != null ? 'show_estimate' : 'manual')
+    if (estimatedKm != null)      setPhase('show_estimate')
+    else if (phase === 'editing') setPhase('no_index')
+    else                          setPhase('manual')
   }
 
   function handleRetry() {
-    if (originStation && destStation) triggerEstimate(originStation, destStation, true)
+    if (originStation && destStation) triggerLookup(originStation, destStation)
   }
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -246,21 +278,26 @@ export default function RecallLegDistanceField({
             animation: 'spin 0.8s linear infinite', flexShrink: 0,
           }} />
           <span style={{ color: '#93c5fd', fontSize: '0.85rem' }}>
-            Calculating driving distance…
+            Looking up indexed distance…
           </span>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
 
-      {/* Estimate ready */}
+      {/* Indexed value ready */}
       {phase === 'show_estimate' && estimatedKm != null && (
         <div style={S.estimateBox}>
-          <div style={S.estimateLabel}>Auto-calculated estimate</div>
+          <div style={S.estimateLabel}>FRV Index (KM) · indexed lookup</div>
           <div style={S.estimateKm}>{estimatedKm} km</div>
+          {versionLabel && (
+            <div style={{ ...S.help, marginTop: '-4px', marginBottom: '8px' }}>
+              Source: {versionLabel}
+            </div>
+          )}
           <div style={S.disclaimer}>{DISCLAIMER_TEXT}</div>
           <div style={S.btnRow}>
             <button type="button" onClick={handleAccept} style={S.btnPrimary}>
-              Accept Estimate
+              Accept Indexed Distance
             </button>
             <button type="button" onClick={handleStartEdit} style={S.btnSecondary}>
               Edit Distance
@@ -270,6 +307,44 @@ export default function RecallLegDistanceField({
             </button>
           </div>
         </div>
+      )}
+
+      {/* No indexed match — controlled warning, manual entry only */}
+      {phase === 'no_index' && (
+        <>
+          <div style={{
+            background: 'rgba(251,191,36,0.08)',
+            border: '1px solid rgba(251,191,36,0.35)',
+            borderRadius: '8px',
+            padding: '10px 14px',
+            fontSize: '0.8rem',
+            color: '#fbbf24',
+            marginBottom: '10px',
+          }}>
+            {NO_INDEX_TEXT}
+            {versionLabel && (
+              <div style={{ marginTop: '4px', fontSize: '0.72rem', color: '#a16207' }}>
+                Active index: {versionLabel}
+              </div>
+            )}
+          </div>
+          <input
+            type="number" min="0" step="0.1" placeholder="0.0"
+            value={value}
+            onChange={(e) => { onChange(e.target.value); emitMeta(e.target.value, 'manual') }}
+            style={S.input}
+          />
+          <div style={S.btnRow}>
+            <button
+              type="button"
+              onClick={handleRetry}
+              style={{ ...S.btnSecondary, fontSize: '0.78rem', padding: '6px 12px' }}
+            >
+              Retry Indexed Lookup
+            </button>
+          </div>
+          <p style={S.help}>One-way distance (rostered → recall). Return leg is automatic (×2).</p>
+        </>
       )}
 
       {/* Editing override */}
@@ -344,7 +419,7 @@ export default function RecallLegDistanceField({
               onClick={handleRetry}
               style={{ ...S.btnSecondary, fontSize: '0.78rem', padding: '6px 12px' }}
             >
-              Retry Auto-Calculate
+              Retry Indexed Lookup
             </button>
           </div>
           <p style={S.help}>One-way distance (rostered → recall). Return leg is automatic (×2).</p>

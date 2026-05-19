@@ -5,7 +5,13 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase, fat } from '@/lib/supabaseClient'
 import AppShell from '@/components/nav/AppShell'
-import { markAllDistancesStale, normaliseAddress } from '@/lib/distance/addressCache'
+import {
+  markAllDistancesStale,
+  normaliseAddress,
+  getHomeAddress,
+  saveHomeAddress,
+} from '@/lib/distance/addressCache'
+import AddressAutocomplete from '@/components/profile/AddressAutocomplete'
 
 const S = {
   inner: { maxWidth: '560px', margin: '0 auto', padding: '32px 16px', boxSizing: 'border-box' },
@@ -22,6 +28,10 @@ const S = {
   success: { background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', color: '#4ade80', borderRadius: '10px', padding: '12px 16px', fontSize: '0.875rem', marginBottom: '16px' },
   error: { background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', borderRadius: '8px', padding: '10px 14px', fontSize: '0.85rem', marginBottom: '16px' },
   note: { background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: '8px', padding: '10px 14px', fontSize: '0.8rem', color: '#fbbf24', marginTop: '8px' },
+  statusRow: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', fontSize: '0.8rem', fontWeight: 500 },
+  badge: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', fontSize: '0.72rem', fontWeight: 700, flexShrink: 0 },
+  badgeVerified: { background: 'rgba(34,197,94,0.18)', color: '#4ade80' },
+  badgeWarn:     { background: 'rgba(251,191,36,0.18)', color: '#fbbf24' },
 }
 
 const PLATOONS = ['A', 'B', 'C', 'D', 'Z']
@@ -34,6 +44,12 @@ export default function ProfilePage() {
   const [lastName, setLastName] = useState('')
   const [homeAddress, setHomeAddress] = useState('')
   const [originalHomeAddress, setOriginalHomeAddress] = useState('')
+  // Verified-address state — populated either from fat.home_address on load,
+  // or from the AddressAutocomplete onSelect callback. The hash is kept so the
+  // UI can detect that the user has since edited the text away from the
+  // verified canonical value (in which case `verified` falls to false).
+  const [verifiedAddress, setVerifiedAddress] = useState(null)
+  //   shape: { hash, lat, lng, geocodedAt }
   const [platoon, setPlatoon] = useState('')
   const [payNumber, setPayNumber] = useState('')
   const [stationId, setStationId] = useState('')
@@ -85,6 +101,25 @@ export default function ProfilePage() {
           setStationName(ext.rostered_station_label || '')
           setHomeDistKm(ext.home_dist_km != null ? Number(ext.home_dist_km) : null)
         }
+        // Seed verified state from the existing geocoded home record if its
+        // hash still matches the current profile address (i.e. the user has
+        // not since edited the text manually).
+        const homeRec = await getHomeAddress(session.user.id)
+        if (
+          homeRec &&
+          homeRec.geocode_status === 'ok' &&
+          homeRec.lat != null &&
+          homeRec.lng != null &&
+          ext &&
+          normaliseAddress(homeRec.address_text) === normaliseAddress(ext.home_address || '')
+        ) {
+          setVerifiedAddress({
+            hash: homeRec.address_hash,
+            lat:  Number(homeRec.lat),
+            lng:  Number(homeRec.lng),
+            geocodedAt: homeRec.geocoded_at || null,
+          })
+        }
         // Load stations from FAT-owned fat.stations table
         const { data: stns } = await fat
           .from('stations')
@@ -134,6 +169,34 @@ export default function ProfilePage() {
         pay_number:             payNumber.trim() || null,
       }, { onConflict: 'user_id' })
       if (extError) throw extError
+
+      // If the user picked a verified suggestion AND that selection still
+      // matches the text in the input, pre-populate fat.home_address with the
+      // already-known coordinates. This means the recall-leg distance
+      // estimator will cache-hit on its next call and skip the lazy Nominatim
+      // geocode entirely (existing distance cache architecture is preserved —
+      // see lib/distance/distanceEstimator.js ensureHomeRecord()).
+      const trimmedHome = homeAddress.trim()
+      const verifiedNow =
+        verifiedAddress &&
+        verifiedAddress.hash === normaliseAddress(trimmedHome) &&
+        isFinite(verifiedAddress.lat) &&
+        isFinite(verifiedAddress.lng)
+      if (verifiedNow) {
+        try {
+          await saveHomeAddress(
+            session.user.id,
+            trimmedHome,
+            verifiedAddress.lat,
+            verifiedAddress.lng,
+            'ok',
+          )
+        } catch (geoErr) {
+          // Non-fatal: profile_ext save already succeeded, the lazy geocode
+          // on next Recall claim will still work. Log for visibility.
+          console.error('[profile] saveHomeAddress (verified) failed:', geoErr)
+        }
+      }
 
       const addressChanged =
         normaliseAddress(homeAddress) !== normaliseAddress(originalHomeAddress)
@@ -255,13 +318,59 @@ export default function ProfilePage() {
           <div style={S.card}>
             <h2 style={S.cardTitle}>Home Address</h2>
             <div style={S.field}>
-              <label style={S.label}>Home Address</label>
-              <input type="text" value={homeAddress} onChange={(e) => setHomeAddress(e.target.value)} placeholder="12 Station Road, Suburb VIC 3000" style={S.input} autoComplete="street-address" />
+              <label style={S.label} htmlFor="home-address">Home Address</label>
+              <AddressAutocomplete
+                id="home-address"
+                value={homeAddress}
+                onChange={setHomeAddress}
+                onSelect={(s) => {
+                  setVerifiedAddress({
+                    hash: normaliseAddress(s.label),
+                    lat:  s.lat,
+                    lng:  s.lng,
+                    geocodedAt: new Date().toISOString(),
+                  })
+                }}
+                onClearVerified={() => setVerifiedAddress(null)}
+                verified={
+                  !!verifiedAddress &&
+                  verifiedAddress.hash === normaliseAddress(homeAddress || '')
+                }
+                placeholder="Start typing — 12 Smith St, Brunswick…"
+              />
+              {(() => {
+                const trimmed = (homeAddress || '').trim()
+                const isVerified =
+                  !!verifiedAddress &&
+                  verifiedAddress.hash === normaliseAddress(trimmed)
+                if (isVerified) {
+                  return (
+                    <div style={{ ...S.statusRow, color: '#4ade80' }}>
+                      <span style={{ ...S.badge, ...S.badgeVerified }}>&#10003;</span>
+                      <span>
+                        Address verified &middot; ready for distance calculations.
+                      </span>
+                    </div>
+                  )
+                }
+                if (trimmed.length >= 3) {
+                  return (
+                    <div style={{ ...S.statusRow, color: '#fbbf24' }}>
+                      <span style={{ ...S.badge, ...S.badgeWarn }}>!</span>
+                      <span>
+                        Please choose a suggested address for verified
+                        distance calculations.
+                      </span>
+                    </div>
+                  )
+                }
+                return null
+              })()}
               <p style={S.help}>Used to calculate your home-to-station distance on Recall claims.</p>
               <div style={S.note}>Changing your address only affects future claims. Existing claims retain the address used at creation.</div>
             </div>
             <div style={{ marginTop: '4px', padding: '10px 14px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '8px', fontSize: '0.8rem', color: '#6b7280' }}>
-              Recall claims auto-estimate the home-to-station distance using OpenStreetMap. You can accept the estimate or override it manually on each claim, and confirmed values are cached for next time.
+              Recall claims auto-estimate the home-to-station distance using OpenStreetMap. Picking a verified address here speeds up that calculation and avoids re-geocoding. You can still accept, override, or recalculate on each claim.
             </div>
           </div>
 

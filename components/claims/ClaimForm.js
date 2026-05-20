@@ -11,14 +11,14 @@
 //   - financialYearId prop wired into addClaim for FY + numbering
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { useRates } from '@/lib/calculations/RatesContext'
 import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import StationDistanceField from '@/components/distance/StationDistanceField'
 import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField'
 import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
-import { parseAndResolve } from '@/lib/distance/stationParser'
+import { parseAndResolve, composeStationLabel } from '@/lib/distance/stationParser'
 import {
   calcRecallClaim,
   calcRetainClaim,
@@ -241,13 +241,9 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
     const parsed = parseAndResolve(values.rosteredStn, stations)
     if (parsed) return parsed
     if (profile?.stationId) {
-      const fallbackName =
-        profile.stationName ||
-        (profile.stationLabel || '').replace(/^FS\d+\s*[-–—]\s*/i, '').trim() ||
-        null
       return {
         id:           profile.stationId,
-        name:         fallbackName,
+        name:         profile.stationName || null,
         abbreviation: `FS${profile.stationId}`,
         label:        profile.stationLabel || `FS${profile.stationId}`,
       }
@@ -418,13 +414,9 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
   // the Recall flow so the user gets the same chip feedback + auto-distance UX.
   const rosterStation = (() => {
     if (profile?.stationId) {
-      const fallbackName =
-        profile.stationName ||
-        (profile.stationLabel || '').replace(/^FS\d+\s*[-–—]\s*/i, '').trim() ||
-        null
       return {
         id:           profile.stationId,
-        name:         fallbackName,
+        name:         profile.stationName || null,
         abbreviation: `FS${profile.stationId}`,
         label:        profile.stationLabel || `FS${profile.stationId}`,
       }
@@ -621,13 +613,24 @@ function getTodayLocal() {
 // ─── Main ClaimForm ───────────────────────────────────────────────────────────
 // financialYearId: passed from NewClaimModal -> wired into addClaim for FY + numbering
 
-export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel }) {
+export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel, initialClaimType, initialStandbyType }) {
   const { addClaim } = useClaims()
   const { rates }    = useRates()
 
-  const [claimType, setClaimType]           = useState('recalls')
+  // Quick-action prefill: open the form directly on the requested type.
+  // initialStandbyType lets the M&D quick-action land on Standby with the
+  // Muster & Dismiss sub-type pre-selected (no separate top-level type).
+  const startingType = CLAIM_TYPE_ORDER.includes(initialClaimType) ? initialClaimType : 'recalls'
+
+  const [claimType, setClaimType]           = useState(startingType)
   const [date, setDate]                     = useState(getTodayLocal)
-  const [fields, setFields]                 = useState({ ...DEFAULTS.recalls })
+  const [fields, setFields]                 = useState(() => {
+    const base = { ...DEFAULTS[startingType] }
+    if (startingType === 'standby' && initialStandbyType) {
+      base.standbyType = initialStandbyType
+    }
+    return base
+  })
   const [breakdown, setBreakdown]           = useState(null)
   const [adjustedAmount, setAdjustedAmount] = useState(null)
   const [showCalcLines, setShowCalcLines]   = useState(null)
@@ -657,7 +660,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     ;(async () => {
       const { data: ext } = await fat
         .from('profile_ext')
-        .select('station_id, rostered_station_label, home_dist_km, home_address, platoon')
+        .select('station_id, home_dist_km, home_address, platoon')
         .eq('user_id', userId)
         .maybeSingle()
       if (cancelled) return
@@ -674,10 +677,13 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       }
 
       if (ext) {
+        // Single canonical shape: (station_id, bare name from fat.stations).
+        // rostered_station_label is a write-only cache and is never read
+        // here — so a poisoned label can never round-trip through state.
         setProfile({
           stationId:    ext.station_id,
           stationName,
-          stationLabel: ext.rostered_station_label || (ext.station_id ? 'FS' + ext.station_id : ''),
+          stationLabel: composeStationLabel(ext.station_id, stationName),
           homeDistKm:   ext.home_dist_km || 0,
           homeAddress:  ext.home_address || '',
           platoon:      ext.platoon || '',
@@ -714,12 +720,19 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
   // Reset fields when type or profile changes.
   // Note: date is intentionally NOT reset here - it stays as today's date
   // regardless of claim type switch, and the user can still change it manually.
+  // On first mount with a quick-action prefill, preserve initialStandbyType so
+  // the M&D button lands on Standby with the M&D sub-type already selected.
+  const didMountRef = useRef(false)
   useEffect(() => {
     const defaults = { ...DEFAULTS[claimType] }
     if (claimType === 'recalls' && profile?.stationLabel) {
       defaults.rosteredStn = profile.stationLabel
       defaults.distHomeKm  = profile.homeDistKm ? String(profile.homeDistKm) : ''
     }
+    if (!didMountRef.current && claimType === 'standby' && initialStandbyType) {
+      defaults.standbyType = initialStandbyType
+    }
+    didMountRef.current = true
     setFields(defaults)
     setBreakdown(null)
     setAdjustedAmount(null)
@@ -728,7 +741,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     setRecallHomeMeta(null)
     setRecallStnMeta(null)
     setStandbyTravelMeta(null)
-  }, [claimType, profile])
+  }, [claimType, profile, initialStandbyType])
 
   // Auto-calculate on field/rate change
   useEffect(() => {

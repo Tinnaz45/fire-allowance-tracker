@@ -11,6 +11,7 @@ import {
   getHomeAddress,
   saveHomeAddress,
 } from '@/lib/distance/addressCache'
+import { composeStationLabel } from '@/lib/distance/stationParser'
 import AddressAutocomplete from '@/components/profile/AddressAutocomplete'
 
 const S = {
@@ -74,37 +75,58 @@ export default function ProfilePage() {
     if (!session) return
     const load = async () => {
       try {
-        // Load FAT-authoritative identity profile.
-        // fat.profiles is auto-seeded by the on_auth_user_created_fat trigger,
-        // so a row exists for every authenticated user (use maybeSingle defensively).
-        const { data: profile } = await fat
-          .from('profiles')
-          .select('first_name, last_name')
-          .eq('id', session.user.id)
-          .maybeSingle()
+        // Fetch identity, profile extension, stations, and home-address record
+        // in parallel. Stations are the canonical source for bare station
+        // names — `rostered_station_label` is a write-side denormalized cache
+        // and is intentionally NOT read into state. This removes the
+        // bare/composed dual-shape that caused the "FS42 - FS42 - Newport"
+        // hydration bug; the in-memory shape is now strictly (station_id, bare name).
+        const [profileResult, extResult, stationsResult, homeRec] = await Promise.all([
+          fat.from('profiles')
+             .select('first_name, last_name')
+             .eq('id', session.user.id)
+             .maybeSingle(),
+          fat.from('profile_ext')
+             .select('home_address, platoon, pay_number, station_id, home_dist_km')
+             .eq('user_id', session.user.id)
+             .maybeSingle(),
+          fat.from('stations')
+             .select('id, name, abbreviation')
+             .eq('is_active', true)
+             .order('id', { ascending: true }),
+          getHomeAddress(session.user.id),
+        ])
+
+        const profile = profileResult.data
+        const ext     = extResult.data
+        const stns    = stationsResult.data || []
+
+        setStations(stns)
+
         if (profile) {
           setFirstName(profile.first_name || '')
           setLastName(profile.last_name || '')
         }
-        // Load FAT-specific profile extension
-        const { data: ext } = await fat
-          .from('profile_ext')
-          .select('home_address, platoon, pay_number, station_id, rostered_station_label, home_dist_km')
-          .eq('user_id', session.user.id)
-          .maybeSingle()
+
         if (ext) {
           setHomeAddress(ext.home_address || '')
           setOriginalHomeAddress(ext.home_address || '')
           setPlatoon(ext.platoon || '')
           setPayNumber(ext.pay_number || '')
-          setStationId(ext.station_id ? String(ext.station_id) : '')
-          setStationName(ext.rostered_station_label || '')
+          const sid = ext.station_id ? String(ext.station_id) : ''
+          setStationId(sid)
+          // Derive bare station name from canonical fat.stations row keyed by
+          // station_id. We deliberately never read rostered_station_label here
+          // — even legacy poisoned rows (e.g. "FS42 - FS42 - Newport") become
+          // invisible because the display path never consults that column.
+          const matched = sid ? stns.find((s) => String(s.id) === sid) : null
+          setStationName(matched?.name || '')
           setHomeDistKm(ext.home_dist_km != null ? Number(ext.home_dist_km) : null)
         }
+
         // Seed verified state from the existing geocoded home record if its
         // hash still matches the current profile address (i.e. the user has
         // not since edited the text manually).
-        const homeRec = await getHomeAddress(session.user.id)
         if (
           homeRec &&
           homeRec.geocode_status === 'ok' &&
@@ -120,13 +142,6 @@ export default function ProfilePage() {
             geocodedAt: homeRec.geocoded_at || null,
           })
         }
-        // Load stations from FAT-owned fat.stations table
-        const { data: stns } = await fat
-          .from('stations')
-          .select('id, name, abbreviation')
-          .eq('is_active', true)
-          .order('id', { ascending: true })
-        if (stns) setStations(stns)
       } catch (err) {
         setErrorMsg('Could not load profile. Please refresh.')
       }
@@ -147,7 +162,11 @@ export default function ProfilePage() {
     if (!homeAddress.trim()) { setErrorMsg('Home address is required for travel calculations.'); return }
     setSaving(true)
     try {
-      const stationLabel = stationId ? (stationName ? `FS${stationId} - ${stationName}` : `FS${stationId}`) : ''
+      // stationName is guaranteed bare (sourced from fat.stations.name on
+      // hydration and on every picker click), so composeStationLabel just
+      // prepends "FS{id} - ". The DB column is a write-only cache —
+      // hydration ignores it and re-derives the name from fat.stations.
+      const stationLabel = composeStationLabel(stationId, stationName)
 
       // fat.profiles is FAT-owned authoritative identity (mirrors mica.profiles).
       // email is NOT NULL and sourced from auth.users; include it on every
@@ -224,7 +243,7 @@ export default function ProfilePage() {
   }
   if (!session) return null
 
-  const activeStationLabel = stationId ? (stationName ? `FS${stationId} - ${stationName}` : `FS${stationId}`) : null
+  const activeStationLabel = composeStationLabel(stationId, stationName) || null
   const validDistance = activeStationLabel && typeof homeDistKm === 'number' && Number.isFinite(homeDistKm) && homeDistKm > 0 ? homeDistKm : null
   const fmtKm = (n) => (n % 1 === 0 ? n.toFixed(0) : n.toFixed(1))
 

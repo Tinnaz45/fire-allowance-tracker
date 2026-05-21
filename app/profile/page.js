@@ -13,6 +13,7 @@ import {
 } from '@/lib/distance/addressCache'
 import { composeStationLabel } from '@/lib/distance/stationParser'
 import AddressAutocomplete from '@/components/profile/AddressAutocomplete'
+import PlatoonPicker from '@/components/profile/PlatoonPicker'
 
 const S = {
   inner: { maxWidth: '560px', margin: '0 auto', padding: '32px 16px', boxSizing: 'border-box' },
@@ -34,8 +35,6 @@ const S = {
   badgeVerified: { background: 'rgba(34,197,94,0.18)', color: '#4ade80' },
   badgeWarn:     { background: 'rgba(251,191,36,0.18)', color: '#fbbf24' },
 }
-
-const PLATOONS = ['A', 'B', 'C', 'D', 'Z']
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -327,10 +326,7 @@ export default function ProfilePage() {
             </div>
             <div style={S.field}>
               <label style={S.label}>Platoon</label>
-              <select value={platoon} onChange={(e) => setPlatoon(e.target.value)} style={S.select}>
-                <option value="">Select platoon</option>
-                {PLATOONS.map((p) => <option key={p} value={p}>{p} Platoon</option>)}
-              </select>
+              <PlatoonPicker value={platoon} onChange={setPlatoon} />
             </div>
           </div>
 

@@ -11,7 +11,7 @@
 //   - financialYearId prop wired into addClaim for FY + numbering
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { useRates } from '@/lib/calculations/RatesContext'
 import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
@@ -426,20 +426,12 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
   })()
   const standbyStation = parseAndResolve(values.standbyStn, stations)
 
+  const isMD = values.standbyType === 'M&D'
+
   return (
     <>
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Standby Type</label>
-        <select value={values.standbyType}
-          onChange={(e) => onChange('standbyType', e.target.value)}
-          style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
-          <option value="Standby">Standby - Standby and Dismi on payslip</option>
-          <option value="M&D">M&D - no meal allowance</option>
-        </select>
-      </div>
-
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Standby / M&D Station</label>
+        <label style={LABEL_STYLE}>{isMD ? 'M&D Station' : 'Standby Station'}</label>
         <input type="text" value={values.standbyStn || ''}
           onChange={(e) => onChange('standbyStn', e.target.value)}
           placeholder="e.g. FS44 - Sunshine" style={INPUT_STYLE} />
@@ -473,7 +465,7 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
           type only). Stored as canonical "HHMM" 4-digit string — manual
           numeric entry, no browser time picker. Day never qualifies for a
           meal; the time is captured for audit. */}
-      {values.standbyType !== 'M&D' && (
+      {!isMD && (
         <div style={FIELD}>
           <label style={LABEL_STYLE}>Time Arrived (24hr)</label>
           <input
@@ -496,7 +488,7 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
 
       {/* Meal Allowance entitlement — always visible for Standby type.
           Eligible only when shift=Night AND arrivedTime >= 1900. */}
-      {values.standbyType !== 'M&D' && (
+      {!isMD && (
         <div style={FIELD}>
           <label style={LABEL_STYLE}>Meal Allowance</label>
           <div style={{
@@ -512,13 +504,13 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
         </div>
       )}
 
-      {values.standbyType === 'M&D' && (
+      {isMD && (
         <div style={{
           padding: '8px 12px', borderRadius: '6px', marginBottom: '16px',
           background: 'rgba(107,114,128,0.1)', border: '1px solid rgba(107,114,128,0.3)',
           fontSize: '0.78rem', color: '#9ca3af',
         }}>
-          M&D claims have no meal allowance.
+          Muster &amp; Dismiss claims have no meal allowance.
         </div>
       )}
     </>
@@ -613,6 +605,7 @@ const DEFAULTS = {
   recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
   retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '', shift: 'Day', bookedOffTime: '' },
   standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
+  md:           { standbyType: 'M&D',     standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
   spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
   delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
 }
@@ -629,24 +622,16 @@ function getTodayLocal() {
 // ─── Main ClaimForm ───────────────────────────────────────────────────────────
 // financialYearId: passed from NewClaimModal -> wired into addClaim for FY + numbering
 
-export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel, initialClaimType, initialStandbyType }) {
+export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel, initialClaimType }) {
   const { addClaim } = useClaims()
   const { rates }    = useRates()
 
   // Quick-action prefill: open the form directly on the requested type.
-  // initialStandbyType lets the M&D quick-action land on Standby with the
-  // Muster & Dismiss sub-type pre-selected (no separate top-level type).
   const startingType = CLAIM_TYPE_ORDER.includes(initialClaimType) ? initialClaimType : 'recalls'
 
   const [claimType, setClaimType]           = useState(startingType)
   const [date, setDate]                     = useState(getTodayLocal)
-  const [fields, setFields]                 = useState(() => {
-    const base = { ...DEFAULTS[startingType] }
-    if (startingType === 'standby' && initialStandbyType) {
-      base.standbyType = initialStandbyType
-    }
-    return base
-  })
+  const [fields, setFields]                 = useState(() => ({ ...DEFAULTS[startingType] }))
   const [breakdown, setBreakdown]           = useState(null)
   const [adjustedAmount, setAdjustedAmount] = useState(null)
   const [showCalcLines, setShowCalcLines]   = useState(null)
@@ -736,19 +721,12 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
   // Reset fields when type or profile changes.
   // Note: date is intentionally NOT reset here - it stays as today's date
   // regardless of claim type switch, and the user can still change it manually.
-  // On first mount with a quick-action prefill, preserve initialStandbyType so
-  // the M&D button lands on Standby with the M&D sub-type already selected.
-  const didMountRef = useRef(false)
   useEffect(() => {
     const defaults = { ...DEFAULTS[claimType] }
     if (claimType === 'recalls' && profile?.stationLabel) {
       defaults.rosteredStn = profile.stationLabel
       defaults.distHomeKm  = profile.homeDistKm ? String(profile.homeDistKm) : ''
     }
-    if (!didMountRef.current && claimType === 'standby' && initialStandbyType) {
-      defaults.standbyType = initialStandbyType
-    }
-    didMountRef.current = true
     setFields(defaults)
     setBreakdown(null)
     setAdjustedAmount(null)
@@ -757,7 +735,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     setRecallHomeMeta(null)
     setRecallStnMeta(null)
     setStandbyTravelMeta(null)
-  }, [claimType, profile, initialStandbyType])
+  }, [claimType, profile])
 
   // Auto-calculate on field/rate change
   useEffect(() => {
@@ -777,7 +755,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           shift:         fields.shift,
           bookedOffTime: fields.bookedOffTime,
         }, rates)
-      } else if (claimType === 'standby') {
+      } else if (claimType === 'standby' || claimType === 'md') {
         const hasNightMeal = isStandbyNightMealEligible({
           standbyType: fields.standbyType,
           shift:       fields.shift,
@@ -804,7 +782,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         distHomeKm: num(fields.distHomeKm), distStnKm: num(fields.distStnKm),
         mealEntitlement: fields.mealEntitlement,
       }, rates, { rosterStation: fields.rosteredStn || 'Rostered Stn', recallStation: fields.recallStn || 'Recall Stn' })
-    } else if (claimType === 'standby') {
+    } else if (claimType === 'standby' || claimType === 'md') {
       lines = buildStandbyCalcLines({
         distKm: num(fields.distKm), standbyType: fields.standbyType,
         arrivedTime: fields.arrivedTime, shift: fields.shift,
@@ -860,7 +838,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         rates,
         { rosterStation: fields.rosteredStn, recallStation: fields.recallStn }
       )
-    } else if (claimType === 'standby') {
+    } else if (claimType === 'standby' || claimType === 'md') {
       calcLines = buildStandbyCalcLines(
         { distKm: num(fields.distKm), standbyType: fields.standbyType, arrivedTime: fields.arrivedTime, shift: fields.shift },
         rates
@@ -895,7 +873,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     // (google_km_*, matrix_hours, routing_source, travel_calc_at).
     const routingMeta = claimType === 'recalls'
       ? { home: recallHomeMeta, stn: recallStnMeta }
-      : claimType === 'standby'
+      : (claimType === 'standby' || claimType === 'md')
         ? { standby: standbyTravelMeta }
         : null
 
@@ -957,7 +935,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           mealEligibility={calcRetainMealEligibility({ shift: fields.shift, bookedOffTime: fields.bookedOffTime })}
         />
       )}
-      {claimType === 'standby'      && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
+      {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
       {(claimType === 'spoilt' || claimType === 'delayed_meal') && (
         <SpoiltInputs values={fields} onChange={handleFieldChange} claimType={claimType} />
       )}

@@ -90,12 +90,24 @@ const CARD_CONFIG = {
       </svg>
     ),
   },
+  md: {
+    label:       'Muster & Dismiss',
+    emptyLabel:  'No M&D claims yet',
+    accentColor: '#14b8a6',   // teal
+    accentAlpha: 'rgba(20,184,166,0.12)',
+    icon: (
+      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a4 4 0 10-3-6.65" />
+      </svg>
+    ),
+  },
 }
 
 // ─── RecentClaimCard ──────────────────────────────────────────────────────────
 // Renders a single "most recent" card for one claim type.
 // Props:
-//   claimType  — 'recalls' | 'retain' | 'standby'
+//   claimType  — 'recalls' | 'retain' | 'standby' | 'md'
 //   claim      — the most recent claim row, or null
 //   onEdit     — called with the claim object when Edit is clicked
 
@@ -233,8 +245,8 @@ function ClaimDetails({ claimType, claim }) {
     }
   }
 
-  if (claimType === 'standby') {
-    if (claim.standby_type) {
+  if (claimType === 'standby' || claimType === 'md') {
+    if (claimType === 'standby' && claim.standby_type) {
       lines.push({ label: 'Type', value: claim.standby_type })
     }
     if (claim.shift) {
@@ -284,6 +296,7 @@ export default function RecentActivitySection({ onEdit }) {
     retain:  claims.find((c) => c.claimType === 'retain')  || null,
     recalls: claims.find((c) => c.claimType === 'recalls') || null,
     standby: claims.find((c) => c.claimType === 'standby') || null,
+    md:      claims.find((c) => c.claimType === 'md')      || null,
   }
 
   // Don't render during the initial load — ClaimList already shows a spinner
@@ -316,6 +329,7 @@ export default function RecentActivitySection({ onEdit }) {
         <RecentClaimCard claimType="retain"  claim={latest.retain}  onEdit={onEdit} />
         <RecentClaimCard claimType="recalls" claim={latest.recalls} onEdit={onEdit} />
         <RecentClaimCard claimType="standby" claim={latest.standby} onEdit={onEdit} />
+        <RecentClaimCard claimType="md"      claim={latest.md}      onEdit={onEdit} />
       </div>
     </div>
   )

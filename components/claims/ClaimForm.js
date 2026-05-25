@@ -18,6 +18,7 @@ import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import StationDistanceField from '@/components/distance/StationDistanceField'
 import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField'
 import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
+import ShiftPicker from '@/components/claims/ShiftPicker'
 import { parseAndResolve, composeStationLabel } from '@/lib/distance/stationParser'
 import {
   calcRecallClaim,
@@ -462,29 +463,51 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Shift</label>
-        <select value={values.shift}
-          onChange={(e) => onChange('shift', e.target.value)}
-          style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
-          <option value="Day">Day - no meal allowance</option>
-          <option value="Night">Night - meal if arrived after 19:00</option>
-        </select>
+        <ShiftPicker
+          value={values.shift}
+          onChange={(v) => onChange('shift', v)}
+        />
       </div>
 
-      {values.shift === 'Night' && values.standbyType !== 'M&D' && (
+      {/* Arrival time is required for both Day and Night standby (Standby
+          type only). Stored as canonical "HHMM" 4-digit string — manual
+          numeric entry, no browser time picker. Day never qualifies for a
+          meal; the time is captured for audit. */}
+      {values.standbyType !== 'M&D' && (
         <div style={FIELD}>
-          <label style={LABEL_STYLE}>Arrival Time (24hr)</label>
-          <input type="time" value={values.arrivedTime}
-            onChange={(e) => onChange('arrivedTime', e.target.value)}
-            style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
+          <label style={LABEL_STYLE}>Time Arrived (24hr)</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]{3,4}"
+            maxLength={4}
+            value={values.arrivedTime || ''}
+            onChange={(e) => {
+              const digits = (e.target.value || '').replace(/\D/g, '').slice(0, 4)
+              onChange('arrivedTime', digits)
+            }}
+            placeholder="e.g. 1930"
+            required
+            style={INPUT_STYLE}
+          />
+          <p style={HELP_STYLE}>Four-digit 24hr time (e.g. 0830, 1930).</p>
+        </div>
+      )}
+
+      {/* Meal Allowance entitlement — always visible for Standby type.
+          Eligible only when shift=Night AND arrivedTime >= 1900. */}
+      {values.standbyType !== 'M&D' && (
+        <div style={FIELD}>
+          <label style={LABEL_STYLE}>Meal Allowance</label>
           <div style={{
-            marginTop: '6px', padding: '8px 12px', borderRadius: '6px', fontSize: '0.78rem',
-            background: nightMealEligible ? 'rgba(34,197,94,0.08)' : 'rgba(251,191,36,0.08)',
-            border: '1px solid ' + (nightMealEligible ? 'rgba(34,197,94,0.3)' : 'rgba(251,191,36,0.3)'),
-            color: nightMealEligible ? '#4ade80' : '#fbbf24',
+            padding: '8px 12px', borderRadius: '6px', fontSize: '0.78rem',
+            background: nightMealEligible ? 'rgba(34,197,94,0.08)' : 'rgba(107,114,128,0.1)',
+            border: '1px solid ' + (nightMealEligible ? 'rgba(34,197,94,0.3)' : 'rgba(107,114,128,0.3)'),
+            color: nightMealEligible ? '#4ade80' : '#9ca3af',
           }}>
             {nightMealEligible
-              ? 'Arrived after 19:00 - night meal applies'
-              : 'Arrival at or before 19:00 does not qualify for night meal'}
+              ? 'Small Meal Allowance — arrived at or after 19:00 on a Night shift'
+              : 'None eligible for this shift'}
           </div>
         </div>
       )}
@@ -498,13 +521,6 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
           M&D claims have no meal allowance.
         </div>
       )}
-
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Pay Number (Standby and Dismi)</label>
-        <input type="text" value={values.payslipPayNbr}
-          onChange={(e) => onChange('payslipPayNbr', e.target.value)}
-          placeholder="e.g. 20.2026" style={INPUT_STYLE} />
-      </div>
     </>
   )
 }
@@ -596,7 +612,7 @@ function SpoiltInputs({ values, onChange, claimType }) {
 const DEFAULTS = {
   recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
   retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '', shift: 'Day', bookedOffTime: '' },
-  standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '', payslipPayNbr: '' },
+  standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
   spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
   delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
 }
@@ -820,6 +836,18 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     e.preventDefault()
     setError(null)
     if (!date) { setError('Please select a date.'); return }
+    if (claimType === 'standby' && fields.standbyType === 'Standby') {
+      const at = (fields.arrivedTime || '').replace(/\D/g, '')
+      if (!at) {
+        setError('Time Arrived is required for Standby claims (both Day and Night shifts).'); return
+      }
+      const padded = at.padStart(4, '0')
+      const h = parseInt(padded.slice(0, 2), 10)
+      const m = parseInt(padded.slice(2, 4), 10)
+      if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) {
+        setError('Time Arrived must be a valid 24hr time (e.g. 0830, 1930).'); return
+      }
+    }
     if (!breakdown || breakdown.totalAmount <= 0) {
       setError('Calculated amount must be greater than $0.00.'); return
     }

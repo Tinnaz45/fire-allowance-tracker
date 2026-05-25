@@ -34,3 +34,8 @@ yarn-error.log*
 
 # patch/debug artifacts — not for version control
 *.patch
+
+# temp/interrupted-write artifacts — must never enter version control
+# (fingerprint of a partial or truncated write)
+*.tmp
+*.tmp.*

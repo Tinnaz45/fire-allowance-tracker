@@ -4,7 +4,7 @@
 // Phase 4 — Expandable multi-component payment UI with normalized filtering.
 //
 // ARCHITECTURE:
-//   - Grouped claims (from fat_claim_groups) render as expandable parent rows.
+//   - Grouped claims (from fat.claim_groups) render as expandable parent rows.
 //   - Each parent expands to reveal its sub-claim payment components.
 //   - Ungrouped/legacy claims render as flat cards (unchanged from ClaimList).
 //   - QuickPayToggle updates payment_status + payment_date per sub-claim.

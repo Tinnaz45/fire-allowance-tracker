@@ -3,8 +3,17 @@
 // Profile Page
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabaseClient'
+import { supabase, fat } from '@/lib/supabaseClient'
 import AppShell from '@/components/nav/AppShell'
+import {
+  markAllDistancesStale,
+  normaliseAddress,
+  getHomeAddress,
+  saveHomeAddress,
+} from '@/lib/distance/addressCache'
+import { composeStationLabel } from '@/lib/distance/stationParser'
+import AddressAutocomplete from '@/components/profile/AddressAutocomplete'
+import PlatoonPicker from '@/components/profile/PlatoonPicker'
 
 const S = {
   inner: { maxWidth: '560px', margin: '0 auto', padding: '32px 16px', boxSizing: 'border-box' },
@@ -21,9 +30,11 @@ const S = {
   success: { background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', color: '#4ade80', borderRadius: '10px', padding: '12px 16px', fontSize: '0.875rem', marginBottom: '16px' },
   error: { background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', borderRadius: '8px', padding: '10px 14px', fontSize: '0.85rem', marginBottom: '16px' },
   note: { background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: '8px', padding: '10px 14px', fontSize: '0.8rem', color: '#fbbf24', marginTop: '8px' },
+  statusRow: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', fontSize: '0.8rem', fontWeight: 500 },
+  badge: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', fontSize: '0.72rem', fontWeight: 700, flexShrink: 0 },
+  badgeVerified: { background: 'rgba(34,197,94,0.18)', color: '#4ade80' },
+  badgeWarn:     { background: 'rgba(251,191,36,0.18)', color: '#fbbf24' },
 }
-
-const PLATOONS = ['A', 'B', 'C', 'D', 'Z']
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -32,10 +43,18 @@ export default function ProfilePage() {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [homeAddress, setHomeAddress] = useState('')
+  const [originalHomeAddress, setOriginalHomeAddress] = useState('')
+  // Verified-address state — populated either from fat.home_address on load,
+  // or from the AddressAutocomplete onSelect callback. The hash is kept so the
+  // UI can detect that the user has since edited the text away from the
+  // verified canonical value (in which case `verified` falls to false).
+  const [verifiedAddress, setVerifiedAddress] = useState(null)
+  //   shape: { hash, lat, lng, geocodedAt }
   const [platoon, setPlatoon] = useState('')
   const [payNumber, setPayNumber] = useState('')
   const [stationId, setStationId] = useState('')
   const [stationName, setStationName] = useState('')
+  const [homeDistKm, setHomeDistKm] = useState(null)
   const [stationSearch, setStationSearch] = useState('')
   const [stations, setStations] = useState([])
   const [showStationPicker, setShowStationPicker] = useState(false)
@@ -55,36 +74,73 @@ export default function ProfilePage() {
     if (!session) return
     const load = async () => {
       try {
-        // Load base profile (shared table — only first_name, last_name, email)
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('first_name, last_name')
-          .eq('id', session.user.id)
-          .single()
+        // Fetch identity, profile extension, stations, and home-address record
+        // in parallel. Stations are the canonical source for bare station
+        // names — `rostered_station_label` is a write-side denormalized cache
+        // and is intentionally NOT read into state. This removes the
+        // bare/composed dual-shape that caused the "FS42 - FS42 - Newport"
+        // hydration bug; the in-memory shape is now strictly (station_id, bare name).
+        const [profileResult, extResult, stationsResult, homeRec] = await Promise.all([
+          fat.from('profiles')
+             .select('first_name, last_name')
+             .eq('id', session.user.id)
+             .maybeSingle(),
+          fat.from('profile_ext')
+             .select('home_address, platoon, pay_number, station_id, home_dist_km')
+             .eq('user_id', session.user.id)
+             .maybeSingle(),
+          fat.from('stations')
+             .select('id, name, abbreviation')
+             .eq('is_active', true)
+             .order('id', { ascending: true }),
+          getHomeAddress(session.user.id),
+        ])
+
+        const profile = profileResult.data
+        const ext     = extResult.data
+        const stns    = stationsResult.data || []
+
+        setStations(stns)
+
         if (profile) {
           setFirstName(profile.first_name || '')
           setLastName(profile.last_name || '')
         }
-        // Load FAT-specific profile extension
-        const { data: ext } = await supabase
-          .from('fat_profile_ext')
-          .select('home_address, platoon, pay_number, station_id, rostered_station_label')
-          .eq('user_id', session.user.id)
-          .maybeSingle()
+
         if (ext) {
           setHomeAddress(ext.home_address || '')
+          setOriginalHomeAddress(ext.home_address || '')
           setPlatoon(ext.platoon || '')
           setPayNumber(ext.pay_number || '')
-          setStationId(ext.station_id ? String(ext.station_id) : '')
-          setStationName(ext.rostered_station_label || '')
+          const sid = ext.station_id ? String(ext.station_id) : ''
+          setStationId(sid)
+          // Derive bare station name from canonical fat.stations row keyed by
+          // station_id. We deliberately never read rostered_station_label here
+          // — even legacy poisoned rows (e.g. "FS42 - FS42 - Newport") become
+          // invisible because the display path never consults that column.
+          const matched = sid ? stns.find((s) => String(s.id) === sid) : null
+          setStationName(matched?.name || '')
+          setHomeDistKm(ext.home_dist_km != null ? Number(ext.home_dist_km) : null)
         }
-        // Load stations from FAT-owned fat_stations table
-        const { data: stns } = await supabase
-          .from('fat_stations')
-          .select('id, name, abbreviation')
-          .eq('is_active', true)
-          .order('id', { ascending: true })
-        if (stns) setStations(stns)
+
+        // Seed verified state from the existing geocoded home record if its
+        // hash still matches the current profile address (i.e. the user has
+        // not since edited the text manually).
+        if (
+          homeRec &&
+          homeRec.geocode_status === 'ok' &&
+          homeRec.lat != null &&
+          homeRec.lng != null &&
+          ext &&
+          normaliseAddress(homeRec.address_text) === normaliseAddress(ext.home_address || '')
+        ) {
+          setVerifiedAddress({
+            hash: homeRec.address_hash,
+            lat:  Number(homeRec.lat),
+            lng:  Number(homeRec.lng),
+            geocodedAt: homeRec.geocoded_at || null,
+          })
+        }
       } catch (err) {
         setErrorMsg('Could not load profile. Please refresh.')
       }
@@ -105,16 +161,24 @@ export default function ProfilePage() {
     if (!homeAddress.trim()) { setErrorMsg('Home address is required for travel calculations.'); return }
     setSaving(true)
     try {
-      const stationLabel = stationId ? (stationName ? `FS${stationId} - ${stationName}` : `FS${stationId}`) : ''
+      // stationName is guaranteed bare (sourced from fat.stations.name on
+      // hydration and on every picker click), so composeStationLabel just
+      // prepends "FS{id} - ". The DB column is a write-only cache —
+      // hydration ignores it and re-derives the name from fat.stations.
+      const stationLabel = composeStationLabel(stationId, stationName)
 
-      const { error: profileError } = await supabase.from('profiles').upsert({
+      // fat.profiles is FAT-owned authoritative identity (mirrors mica.profiles).
+      // email is NOT NULL and sourced from auth.users; include it on every
+      // upsert so the INSERT side of ON CONFLICT stays auth-consistent.
+      const { error: profileError } = await fat.from('profiles').upsert({
         id: session.user.id,
+        email: session.user.email,
         first_name: firstName.trim(),
         last_name: lastName.trim(),
       }, { onConflict: 'id' })
       if (profileError) throw profileError
 
-      const { error: extError } = await supabase.from('fat_profile_ext').upsert({
+      const { error: extError } = await fat.from('profile_ext').upsert({
         user_id:                session.user.id,
         home_address:           homeAddress.trim(),
         platoon:                platoon || null,
@@ -124,7 +188,43 @@ export default function ProfilePage() {
       }, { onConflict: 'user_id' })
       if (extError) throw extError
 
-      setSuccessMsg('Profile saved successfully.')
+      // If the user picked a verified suggestion AND that selection still
+      // matches the text in the input, pre-populate fat.home_address with the
+      // already-known coordinates. This means the recall-leg distance
+      // estimator will cache-hit on its next call and skip the lazy Nominatim
+      // geocode entirely (existing distance cache architecture is preserved —
+      // see lib/distance/distanceEstimator.js ensureHomeRecord()).
+      const trimmedHome = homeAddress.trim()
+      const verifiedNow =
+        verifiedAddress &&
+        verifiedAddress.hash === normaliseAddress(trimmedHome) &&
+        isFinite(verifiedAddress.lat) &&
+        isFinite(verifiedAddress.lng)
+      if (verifiedNow) {
+        try {
+          await saveHomeAddress(
+            session.user.id,
+            trimmedHome,
+            verifiedAddress.lat,
+            verifiedAddress.lng,
+            'ok',
+          )
+        } catch (geoErr) {
+          // Non-fatal: profile_ext save already succeeded, the lazy geocode
+          // on next Recall claim will still work. Log for visibility.
+          console.error('[profile] saveHomeAddress (verified) failed:', geoErr)
+        }
+      }
+
+      const addressChanged =
+        normaliseAddress(homeAddress) !== normaliseAddress(originalHomeAddress)
+      if (addressChanged && originalHomeAddress) {
+        await markAllDistancesStale(session.user.id, 'home_address_changed')
+        setSuccessMsg('Profile saved. Station distances have been marked for re-confirmation on your next Recall claim.')
+      } else {
+        setSuccessMsg('Profile saved successfully.')
+      }
+      setOriginalHomeAddress(homeAddress)
       setTimeout(() => setSuccessMsg(null), 4000)
     } catch (err) {
       setErrorMsg(err.message || 'Failed to save profile.')
@@ -142,7 +242,9 @@ export default function ProfilePage() {
   }
   if (!session) return null
 
-  const activeStationLabel = stationId ? (stationName ? `FS${stationId} - ${stationName}` : `FS${stationId}`) : null
+  const activeStationLabel = composeStationLabel(stationId, stationName) || null
+  const validDistance = activeStationLabel && typeof homeDistKm === 'number' && Number.isFinite(homeDistKm) && homeDistKm > 0 ? homeDistKm : null
+  const fmtKm = (n) => (n % 1 === 0 ? n.toFixed(0) : n.toFixed(1))
 
   return (
     <AppShell>
@@ -179,7 +281,16 @@ export default function ProfilePage() {
             <h2 style={S.cardTitle}>Operational Details</h2>
             <div style={S.field}>
               <label style={S.label}>Rostered Station</label>
-              {activeStationLabel && <div style={S.stationBadge}>{activeStationLabel}</div>}
+              {activeStationLabel && (
+                <div style={S.stationBadge}>
+                  {activeStationLabel}
+                  {validDistance && (
+                    <span style={{ marginLeft: '6px', fontWeight: 500, color: 'rgba(252,165,165,0.65)' }}>
+                      ({fmtKm(validDistance)} km / {fmtKm(validDistance * 2)} km)
+                    </span>
+                  )}
+                </div>
+              )}
               <div style={{ marginTop: activeStationLabel ? '10px' : '0' }}>
                 <input
                   type="text"
@@ -215,23 +326,66 @@ export default function ProfilePage() {
             </div>
             <div style={S.field}>
               <label style={S.label}>Platoon</label>
-              <select value={platoon} onChange={(e) => setPlatoon(e.target.value)} style={S.select}>
-                <option value="">Select platoon</option>
-                {PLATOONS.map((p) => <option key={p} value={p}>{p} Platoon</option>)}
-              </select>
+              <PlatoonPicker value={platoon} onChange={setPlatoon} />
             </div>
           </div>
 
           <div style={S.card}>
             <h2 style={S.cardTitle}>Home Address</h2>
             <div style={S.field}>
-              <label style={S.label}>Home Address</label>
-              <input type="text" value={homeAddress} onChange={(e) => setHomeAddress(e.target.value)} placeholder="12 Station Road, Suburb VIC 3000" style={S.input} autoComplete="street-address" />
+              <label style={S.label} htmlFor="home-address">Home Address</label>
+              <AddressAutocomplete
+                id="home-address"
+                value={homeAddress}
+                onChange={setHomeAddress}
+                onSelect={(s) => {
+                  setVerifiedAddress({
+                    hash: normaliseAddress(s.label),
+                    lat:  s.lat,
+                    lng:  s.lng,
+                    geocodedAt: new Date().toISOString(),
+                  })
+                }}
+                onClearVerified={() => setVerifiedAddress(null)}
+                verified={
+                  !!verifiedAddress &&
+                  verifiedAddress.hash === normaliseAddress(homeAddress || '')
+                }
+                placeholder="Start typing — 12 Smith St, Brunswick…"
+              />
+              {(() => {
+                const trimmed = (homeAddress || '').trim()
+                const isVerified =
+                  !!verifiedAddress &&
+                  verifiedAddress.hash === normaliseAddress(trimmed)
+                if (isVerified) {
+                  return (
+                    <div style={{ ...S.statusRow, color: '#4ade80' }}>
+                      <span style={{ ...S.badge, ...S.badgeVerified }}>&#10003;</span>
+                      <span>
+                        Address verified &middot; ready for distance calculations.
+                      </span>
+                    </div>
+                  )
+                }
+                if (trimmed.length >= 3) {
+                  return (
+                    <div style={{ ...S.statusRow, color: '#fbbf24' }}>
+                      <span style={{ ...S.badge, ...S.badgeWarn }}>!</span>
+                      <span>
+                        Please choose a suggested address for verified
+                        distance calculations.
+                      </span>
+                    </div>
+                  )
+                }
+                return null
+              })()}
               <p style={S.help}>Used to calculate your home-to-station distance on Recall claims.</p>
               <div style={S.note}>Changing your address only affects future claims. Existing claims retain the address used at creation.</div>
             </div>
             <div style={{ marginTop: '4px', padding: '10px 14px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '8px', fontSize: '0.8rem', color: '#6b7280' }}>
-              Distance is currently entered manually on each claim. Google Maps auto-calculation will be available when NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is configured.
+              Recall claims auto-estimate the home-to-station distance using OpenStreetMap. Picking a verified address here speeds up that calculation and avoids re-geocoding. You can still accept, override, or recalculate on each claim.
             </div>
           </div>
 

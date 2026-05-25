@@ -126,7 +126,7 @@ function EditClaimModal({ claim, session, activeFY, onClose, onSuccess }) {
 
 // ─── New Claim Modal ──────────────────────────────────────────────────────────
 
-function NewClaimModal({ session, activeFY, onClose, onSuccess }) {
+function NewClaimModal({ session, activeFY, onClose, onSuccess, initialClaimType, initialStandbyType }) {
   return (
     <ModalBackdrop onClose={onClose}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
@@ -140,8 +140,58 @@ function NewClaimModal({ session, activeFY, onClose, onSuccess }) {
         financialYearId={activeFY?.id || null}
         onSuccess={onSuccess}
         onCancel={onClose}
+        initialClaimType={initialClaimType}
+        initialStandbyType={initialStandbyType}
       />
     </ModalBackdrop>
+  )
+}
+
+// ─── Quick-action button row ──────────────────────────────────────────────────
+// Sits between Recent Activity and My Claims. Each button opens the existing
+// New Claim modal with the corresponding claim type pre-selected. M&D maps to
+// Standby with the Muster & Dismiss sub-type (no separate top-level type).
+
+const QUICK_ACTIONS = [
+  { key: 'retain',       label: 'Retain'        },
+  { key: 'recalls',      label: 'Recall'        },
+  { key: 'standby',      label: 'Standby'       },
+  { key: 'md',           label: 'M&D'           },
+  { key: 'spoilt',       label: 'Spoilt Meal'   },
+  { key: 'delayed_meal', label: 'Delayed Meal'  },
+]
+
+function QuickActionRow({ onSelect }) {
+  return (
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', gap: '8px',
+      margin: '0 0 16px 0',
+    }}>
+      {QUICK_ACTIONS.map(({ key, label }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onSelect(key)}
+          style={{
+            flex: '1 1 auto',
+            minWidth: '92px',
+            padding: '10px 14px',
+            background: 'rgba(220,38,38,0.08)',
+            border: '1px solid rgba(220,38,38,0.3)',
+            borderRadius: '10px',
+            color: '#fca5a5',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            letterSpacing: '0.01em',
+            whiteSpace: 'nowrap',
+            transition: 'background 0.15s, border-color 0.15s',
+          }}
+        >
+          + {label}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -350,6 +400,8 @@ export default function HomePage() {
   const [sessionResolved, setSessionResolved] = useState(false)
 
   const [showNewClaimModal, setShowNewClaimModal] = useState(false)
+  const [quickActionType, setQuickActionType] = useState(null)        // claimType for prefill (e.g. 'standby')
+  const [quickActionStandbyType, setQuickActionStandbyType] = useState(null) // 'M&D' for the M&D quick-action
   const [editingClaim, setEditingClaim] = useState(null)
   const [successMessage, setSuccessMessage] = useState(null)
 
@@ -402,8 +454,29 @@ export default function HomePage() {
 
   const handleClaimSuccess = () => {
     setShowNewClaimModal(false)
+    setQuickActionType(null)
+    setQuickActionStandbyType(null)
     setSuccessMessage('Claim saved successfully!')
     setTimeout(() => setSuccessMessage(null), 4000)
+  }
+
+  // Quick-action click: open modal with the chosen claim type pre-selected.
+  // 'md' is a virtual key that maps to Standby + Muster & Dismiss sub-type.
+  const handleQuickAction = (key) => {
+    if (key === 'md') {
+      setQuickActionType('standby')
+      setQuickActionStandbyType('M&D')
+    } else {
+      setQuickActionType(key)
+      setQuickActionStandbyType(null)
+    }
+    setShowNewClaimModal(true)
+  }
+
+  const handleCloseNewClaim = () => {
+    setShowNewClaimModal(false)
+    setQuickActionType(null)
+    setQuickActionStandbyType(null)
   }
 
   const handleEditSuccess = () => {
@@ -530,6 +603,9 @@ export default function HomePage() {
           {/* ── Recent Activity Section ── */}
           <RecentActivitySection onEdit={setEditingClaim} />
 
+          {/* ── Quick-action claim type buttons ── */}
+          <QuickActionRow onSelect={handleQuickAction} />
+
           {/* ── Claims Section ── */}
           <div style={{
             background: '#1a1a1a', border: '1px solid #2a2a2a',
@@ -550,7 +626,11 @@ export default function HomePage() {
               </div>
 
               <button
-                onClick={() => setShowNewClaimModal(true)}
+                onClick={() => {
+                  setQuickActionType(null)
+                  setQuickActionStandbyType(null)
+                  setShowNewClaimModal(true)
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '6px',
                   padding: '8px 16px', background: '#dc2626', border: 'none',
@@ -733,8 +813,10 @@ export default function HomePage() {
           <NewClaimModal
             session={session}
             activeFY={activeFY}
-            onClose={() => setShowNewClaimModal(false)}
+            onClose={handleCloseNewClaim}
             onSuccess={handleClaimSuccess}
+            initialClaimType={quickActionType}
+            initialStandbyType={quickActionStandbyType}
           />
         )}
 

@@ -12,9 +12,11 @@ A mobile-first web app for tracking fire allowance claims across Recalls, Retain
 2. Click **New project**, give it a name (e.g. `fire-allowance-tracker`), set a database password, choose a region (Australia - Sydney if available).
 3. Wait ~2 minutes for your project to spin up.
 4. Go to the **SQL Editor** (left sidebar).
-5. Paste the entire contents of `supabase-schema.sql` and click **Run**.
-   - This creates all four claim tables, the profiles table, and the row-level security policies so each user only sees their own data.
-6. Go to **Settings → API**.
+5. Paste the entire contents of `supabase/fat-schema.sql` and click **Run**.
+   - This creates the `fat` schema, all FAT-owned tables, the
+     `fat.increment_claim_sequence` RPC, and per-user RLS policies.
+6. Go to **Settings → API → Exposed schemas** and add `fat` alongside `public`.
+   See [docs/FAT_SCHEMA_ARCHITECTURE.md](docs/FAT_SCHEMA_ARCHITECTURE.md).
 7. Copy your **Project URL** and **anon public** key — you'll need these next.
 
 ---
@@ -104,7 +106,7 @@ fire-allowance-tracker/
 ├── app/                        # Next.js App Router pages
 ├── lib/                        # Supabase client, utilities
 ├── public/                     # Static assets (if present)
-├── supabase-schema.sql         # Run this in Supabase SQL editor once
+├── supabase/fat-schema.sql     # Authoritative DDL for the `fat` schema
 ├── vercel.json                 # Vercel deployment config
 ├── package.json                # Next.js 15 dependencies
 ├── .env.example                # Copy to .env.local and add your keys

@@ -11,25 +11,31 @@
 //   - financialYearId prop wired into addClaim for FY + numbering
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { useRates } from '@/lib/calculations/RatesContext'
 import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
+import StationDistanceField from '@/components/distance/StationDistanceField'
+import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField'
+import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
+import { parseAndResolve, composeStationLabel } from '@/lib/distance/stationParser'
 import {
   calcRecallClaim,
   calcRetainClaim,
+  calcRetainMealEligibility,
   calcStandbyClaim,
   calcSpoiltClaim,
   isStandbyNightMealEligible,
   getMealWindow,
   checkTimeInMealWindow,
   buildRecallCalcLines,
+  buildRetainCalcLines,
   buildStandbyCalcLines,
   buildSpoiltCalcLines,
   buildCalcSnapshot,
   roundMoney,
 } from '@/lib/calculations/engine'
-import { supabase } from '@/lib/supabaseClient'
+import { fat } from '@/lib/supabaseClient'
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -108,7 +114,7 @@ function CalcPreview({ breakdown, rates, onShowCalc }) {
   if (breakdown.travelAmount > 0)  lines.push('Travel: $' + breakdown.travelAmount.toFixed(2) + (breakdown.totalKm != null ? ' (' + breakdown.totalKm + ' km x $' + (rates.kilometreRate?.toFixed(2) || '0.99') + ')' : ''))
   if (breakdown.mealieAmount > 0)  lines.push('Meal allowance: $' + breakdown.mealieAmount.toFixed(2))
   if (breakdown.nightMealie > 0)   lines.push('Night meal: $' + breakdown.nightMealie.toFixed(2))
-  if (breakdown.mealAmount > 0)    lines.push('Meal allowance: $' + breakdown.mealAmount.toFixed(2))
+  if (breakdown.mealAmount > 0)    lines.push((breakdown.mealLabel ? breakdown.mealLabel + ': ' : 'Meal allowance: ') + '$' + breakdown.mealAmount.toFixed(2))
   if (breakdown.retainAmount > 0)  lines.push('Retain: $' + breakdown.retainAmount.toFixed(2))
   if (breakdown.overnightCash > 0) lines.push('Overnight: $' + breakdown.overnightCash.toFixed(2))
 
@@ -176,10 +182,80 @@ function AdjustedAmountField({ calculatedAmount, adjustedAmount, onChange }) {
   )
 }
 
+// ─── Resolved-station chip (mirrors profile selector badge) ──────────────────
+// Shown beneath each recall-form station input when parseAndResolve maps the
+// typed text onto a canonical fat.stations row. Gives the same visual
+// confirmation the Profile page's stationBadge gives, so the user knows the
+// downstream auto-distance flow will succeed.
+
+function ResolvedStationChip({ station }) {
+  if (!station) return null
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: '6px',
+      marginTop: '6px', padding: '4px 10px',
+      background: 'rgba(34,197,94,0.08)',
+      border: '1px solid rgba(34,197,94,0.3)',
+      borderRadius: '6px',
+      fontSize: '0.78rem', fontWeight: 600, color: '#4ade80',
+      letterSpacing: '0.02em',
+    }}>
+      <span aria-hidden="true">✓</span>
+      <span>{station.label || `FS${station.id}${station.name ? ' - ' + station.name : ''}`}</span>
+    </div>
+  )
+}
+
+function UnresolvedStationHint() {
+  return (
+    <div style={{
+      marginTop: '6px', padding: '4px 10px',
+      background: 'rgba(251,191,36,0.06)',
+      border: '1px solid rgba(251,191,36,0.25)',
+      borderRadius: '6px',
+      fontSize: '0.74rem', color: '#fbbf24',
+    }}>
+      Type a station number or name (e.g. &ldquo;FS44&rdquo; or &ldquo;Sunshine&rdquo;) to auto-resolve.
+    </div>
+  )
+}
+
 // ─── Sub-form: Recall ─────────────────────────────────────────────────────────
 
-function RecallInputs({ values, onChange, profile }) {
+function RecallInputs({ values, onChange, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta }) {
   const rosterLabel = profile?.stationLabel || ''
+
+  // Resolve both free-text station inputs against fat.stations once per render.
+  // The rostered station defaults to the profile station but can be edited; the
+  // recall station is always typed. Both feed:
+  //   - the resolved-station chips (visual confirmation that the typed text
+  //     mapped to a canonical FRV station, mirroring the Profile selector)
+  //   - the route-summary line (so it reflects what the user typed)
+  //   - StationDistanceField (home → rostered leg, keyed off rosterStation.id)
+  //   - RecallLegDistanceField (rostered → recall leg)
+  //
+  // Fallback for rosterStation: if `parseAndResolve` returns null because the
+  // stations list hasn't loaded yet OR the typed text is unparseable, fall back
+  // to the profile's persisted station so the home-leg estimate isn't blocked.
+  const rosterStation = (() => {
+    const parsed = parseAndResolve(values.rosteredStn, stations)
+    if (parsed) return parsed
+    if (profile?.stationId) {
+      return {
+        id:           profile.stationId,
+        name:         profile.stationName || null,
+        abbreviation: `FS${profile.stationId}`,
+        label:        profile.stationLabel || `FS${profile.stationId}`,
+      }
+    }
+    return null
+  })()
+
+  const recallStation = parseAndResolve(values.recallStn, stations)
+
+  const rosterRouteLabel = rosterStation?.label || rosterLabel || 'Rostered Stn'
+  const recallRouteLabel = recallStation?.label || 'Recall Stn'
+
   return (
     <>
       <div style={{
@@ -188,7 +264,7 @@ function RecallInputs({ values, onChange, profile }) {
         fontSize: '0.8rem', color: '#9ca3af', lineHeight: 1.8,
       }}>
         <div style={{ fontWeight: 700, color: '#e5e7eb', marginBottom: '4px' }}>Recall Route</div>
-        <div>Home - {rosterLabel || 'Rostered Stn'} - Recall Stn - {rosterLabel || 'Rostered Stn'} - Home</div>
+        <div>Home - {rosterRouteLabel} - {recallRouteLabel} - {rosterRouteLabel} - Home</div>
       </div>
 
       <div style={FIELD}>
@@ -197,6 +273,9 @@ function RecallInputs({ values, onChange, profile }) {
           onChange={(e) => onChange('rosteredStn', e.target.value)}
           placeholder={rosterLabel || 'e.g. FS45 - Brooklyn'}
           style={INPUT_STYLE} />
+        {rosterStation && (
+          <ResolvedStationChip station={rosterStation} />
+        )}
         <p style={HELP_STYLE}>Auto-filled from your profile. Edit if different for this recall.</p>
       </div>
 
@@ -205,25 +284,32 @@ function RecallInputs({ values, onChange, profile }) {
         <input type="text" value={values.recallStn}
           onChange={(e) => onChange('recallStn', e.target.value)}
           placeholder="e.g. FS44 - Sunshine" style={INPUT_STYLE} />
+        {recallStation
+          ? <ResolvedStationChip station={recallStation} />
+          : (values.recallStn || '').trim()
+            ? <UnresolvedStationHint />
+            : null
+        }
       </div>
 
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Home to Rostered Station (one way, km)</label>
-        <input type="number" min="0" step="0.1" placeholder="0.0"
-          value={values.distHomeKm}
-          onChange={(e) => onChange('distHomeKm', e.target.value)}
-          style={INPUT_STYLE} />
-        <p style={HELP_STYLE}>One-way distance. Return leg is automatic (x2). Total route = (this x2) + (station-to-station x2).</p>
-      </div>
+      <StationDistanceField
+        userId={userId}
+        station={rosterStation}
+        homeAddress={profile?.homeAddress || ''}
+        profileLoading={profileLoading}
+        value={values.distHomeKm}
+        onChange={(v) => onChange('distHomeKm', v)}
+        onRoutingMeta={onHomeLegMeta}
+      />
 
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Rostered to Recall Station (one way, km)</label>
-        <input type="number" min="0" step="0.1" placeholder="0.0"
-          value={values.distStnKm}
-          onChange={(e) => onChange('distStnKm', e.target.value)}
-          style={INPUT_STYLE} />
-        <p style={HELP_STYLE}>Leave 0 if recalled to your own rostered station.</p>
-      </div>
+      <RecallLegDistanceField
+        userId={userId}
+        originStation={rosterStation}
+        destStation={recallStation}
+        value={values.distStnKm}
+        onChange={(km) => onChange('distStnKm', km)}
+        onRoutingMeta={onStnLegMeta}
+      />
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Incident Number</label>
@@ -256,9 +342,46 @@ function RecallInputs({ values, onChange, profile }) {
 
 // ─── Sub-form: Retain ─────────────────────────────────────────────────────────
 
-function RetainInputs({ values, onChange }) {
+function RetainInputs({ values, onChange, mealEligibility }) {
+  const eligTier = mealEligibility?.tier || 'none'
+  const eligColor = eligTier === 'none' ? '#9ca3af' : '#4ade80'
+  const eligBg    = eligTier === 'none' ? 'rgba(107,114,128,0.08)' : 'rgba(34,197,94,0.08)'
+  const eligBorder= eligTier === 'none' ? 'rgba(107,114,128,0.3)' : 'rgba(34,197,94,0.3)'
+
   return (
     <>
+      <div style={FIELD}>
+        <label style={LABEL_STYLE}>Shift Type</label>
+        <select value={values.shift}
+          onChange={(e) => onChange('shift', e.target.value)}
+          style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+          <option value="Day">Day Shift</option>
+          <option value="Night">Night Shift</option>
+        </select>
+        <p style={HELP_STYLE}>Which shift was the retain attached to?</p>
+      </div>
+
+      <div style={FIELD}>
+        <label style={LABEL_STYLE}>Booked Off Time (24hr)</label>
+        <input type="time" value={(values.bookedOffTime || '').slice(0, 5)}
+          onChange={(e) => onChange('bookedOffTime', (e.target.value || '').slice(0, 5))}
+          step="60"
+          style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
+        {mealEligibility?.thresholds && (
+          <p style={HELP_STYLE}>
+            {values.shift} thresholds: Large meal after {mealEligibility.thresholds.large},
+            + Small meal after {mealEligibility.thresholds.smallAdditional}.
+          </p>
+        )}
+        <div style={{
+          marginTop: '8px', padding: '8px 12px', borderRadius: '6px',
+          background: eligBg, border: '1px solid ' + eligBorder,
+          color: eligColor, fontSize: '0.82rem', fontWeight: 600,
+        }}>
+          {mealEligibility?.label || 'Enter shift + booked off time to determine meal eligibility'}
+        </div>
+      </div>
+
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Retain Allowance ($) - Maint stn N/N</label>
         <input type="number" min="0" step="0.01" placeholder="0.00"
@@ -286,7 +409,22 @@ function RetainInputs({ values, onChange }) {
 
 // ─── Sub-form: Standby ────────────────────────────────────────────────────────
 
-function StandbyInputs({ values, onChange, nightMealEligible }) {
+function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, stations, onStandbyMeta }) {
+  // Resolve rostered + standby stations from the profile / typed text. Mirrors
+  // the Recall flow so the user gets the same chip feedback + auto-distance UX.
+  const rosterStation = (() => {
+    if (profile?.stationId) {
+      return {
+        id:           profile.stationId,
+        name:         profile.stationName || null,
+        abbreviation: `FS${profile.stationId}`,
+        label:        profile.stationLabel || `FS${profile.stationId}`,
+      }
+    }
+    return null
+  })()
+  const standbyStation = parseAndResolve(values.standbyStn, stations)
+
   return (
     <>
       <div style={FIELD}>
@@ -300,13 +438,27 @@ function StandbyInputs({ values, onChange, nightMealEligible }) {
       </div>
 
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Distance - return km total</label>
-        <input type="number" min="0" step="0.1" placeholder="0.0"
-          value={values.distKm}
-          onChange={(e) => onChange('distKm', e.target.value)}
-          style={INPUT_STYLE} />
-        <p style={HELP_STYLE}>Enter the total return km (both legs combined).</p>
+        <label style={LABEL_STYLE}>Standby / M&D Station</label>
+        <input type="text" value={values.standbyStn || ''}
+          onChange={(e) => onChange('standbyStn', e.target.value)}
+          placeholder="e.g. FS44 - Sunshine" style={INPUT_STYLE} />
+        {standbyStation
+          ? <ResolvedStationChip station={standbyStation} />
+          : (values.standbyStn || '').trim()
+            ? <UnresolvedStationHint />
+            : null
+        }
+        <p style={HELP_STYLE}>Used for Google KM + FRV matrix hours lookup. Leave blank to enter km manually.</p>
       </div>
+
+      <StandbyDistanceField
+        userId={userId}
+        rosterStation={rosterStation}
+        standbyStation={standbyStation}
+        value={values.distKm}
+        onChange={(km) => onChange('distKm', km)}
+        onRoutingMeta={onStandbyMeta}
+      />
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Shift</label>
@@ -443,8 +595,8 @@ function SpoiltInputs({ values, onChange, claimType }) {
 
 const DEFAULTS = {
   recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
-  retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '' },
-  standby:      { standbyType: 'Standby', distKm: '', shift: 'Day', arrivedTime: '', payslipPayNbr: '' },
+  retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '', shift: 'Day', bookedOffTime: '' },
+  standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '', payslipPayNbr: '' },
   spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
   delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
 }
@@ -461,57 +613,135 @@ function getTodayLocal() {
 // ─── Main ClaimForm ───────────────────────────────────────────────────────────
 // financialYearId: passed from NewClaimModal -> wired into addClaim for FY + numbering
 
-export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel }) {
+export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel, initialClaimType, initialStandbyType }) {
   const { addClaim } = useClaims()
   const { rates }    = useRates()
 
-  const [claimType, setClaimType]           = useState('recalls')
+  // Quick-action prefill: open the form directly on the requested type.
+  // initialStandbyType lets the M&D quick-action land on Standby with the
+  // Muster & Dismiss sub-type pre-selected (no separate top-level type).
+  const startingType = CLAIM_TYPE_ORDER.includes(initialClaimType) ? initialClaimType : 'recalls'
+
+  const [claimType, setClaimType]           = useState(startingType)
   const [date, setDate]                     = useState(getTodayLocal)
-  const [fields, setFields]                 = useState({ ...DEFAULTS.recalls })
+  const [fields, setFields]                 = useState(() => {
+    const base = { ...DEFAULTS[startingType] }
+    if (startingType === 'standby' && initialStandbyType) {
+      base.standbyType = initialStandbyType
+    }
+    return base
+  })
   const [breakdown, setBreakdown]           = useState(null)
   const [adjustedAmount, setAdjustedAmount] = useState(null)
   const [showCalcLines, setShowCalcLines]   = useState(null)
   const [submitting, setSubmitting]         = useState(false)
   const [error, setError]                   = useState(null)
   const [profile, setProfile]               = useState(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [stations, setStations]             = useState([])
+
+  // Routing provenance — captured per-leg from the distance fields so the
+  // submitted claim row carries Google KM, matrix hours, and source labels
+  // for later reproduction. These are populated by onRoutingMeta callbacks
+  // and reset whenever the claim type changes.
+  const [recallHomeMeta,    setRecallHomeMeta]    = useState(null)
+  const [recallStnMeta,     setRecallStnMeta]     = useState(null)
+  const [standbyTravelMeta, setStandbyTravelMeta] = useState(null)
 
   // Load FAT-specific profile extension for pre-fill
-  // Reads from fat_profile_ext (FAT-owned) - not the shared profiles table
+  // Reads from fat.profile_ext (FAT-owned) - not the shared profiles table
   useEffect(() => {
-    if (!userId) return
-    supabase
-      .from('fat_profile_ext')
-      .select('station_id, rostered_station_label, home_dist_km, home_address, platoon')
-      .eq('user_id', userId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          setProfile({
-            stationId:    data.station_id,
-            stationLabel: data.rostered_station_label || (data.station_id ? 'FS' + data.station_id : ''),
-            homeDistKm:   data.home_dist_km || 0,
-            homeAddress:  data.home_address || '',
-            platoon:      data.platoon || '',
-          })
-        }
-      })
+    if (!userId) {
+      setProfileLoading(false)
+      return
+    }
+    let cancelled = false
+    setProfileLoading(true)
+    ;(async () => {
+      const { data: ext } = await fat
+        .from('profile_ext')
+        .select('station_id, home_dist_km, home_address, platoon')
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (cancelled) return
+
+      let stationName = ''
+      if (ext?.station_id) {
+        const { data: stn } = await fat
+          .from('stations')
+          .select('name')
+          .eq('id', ext.station_id)
+          .maybeSingle()
+        if (cancelled) return
+        stationName = stn?.name || ''
+      }
+
+      if (ext) {
+        // Single canonical shape: (station_id, bare name from fat.stations).
+        // rostered_station_label is a write-only cache and is never read
+        // here — so a poisoned label can never round-trip through state.
+        setProfile({
+          stationId:    ext.station_id,
+          stationName,
+          stationLabel: composeStationLabel(ext.station_id, stationName),
+          homeDistKm:   ext.home_dist_km || 0,
+          homeAddress:  ext.home_address || '',
+          platoon:      ext.platoon || '',
+        })
+      } else {
+        setProfile({ stationId: null, stationName: '', stationLabel: '', homeDistKm: 0, homeAddress: '', platoon: '' })
+      }
+      setProfileLoading(false)
+    })()
+    return () => { cancelled = true }
   }, [userId])
+
+  // Load FRV stations list once for free-text recall-station parsing.
+  // Used by RecallLegDistanceField to resolve typed input like "FS44 - Sunshine"
+  // or "Sunshine" into a station ID for the auto-distance flow.
+  useEffect(() => {
+    let cancelled = false
+    fat
+      .from('stations')
+      .select('id, name, abbreviation')
+      .eq('is_active', true)
+      .order('id', { ascending: true })
+      .then(({ data, error: stnErr }) => {
+        if (cancelled) return
+        if (stnErr) {
+          console.warn('[ClaimForm] Stations fetch error:', stnErr)
+          return
+        }
+        if (data) setStations(data)
+      })
+    return () => { cancelled = true }
+  }, [])
 
   // Reset fields when type or profile changes.
   // Note: date is intentionally NOT reset here - it stays as today's date
   // regardless of claim type switch, and the user can still change it manually.
+  // On first mount with a quick-action prefill, preserve initialStandbyType so
+  // the M&D button lands on Standby with the M&D sub-type already selected.
+  const didMountRef = useRef(false)
   useEffect(() => {
     const defaults = { ...DEFAULTS[claimType] }
     if (claimType === 'recalls' && profile?.stationLabel) {
       defaults.rosteredStn = profile.stationLabel
       defaults.distHomeKm  = profile.homeDistKm ? String(profile.homeDistKm) : ''
     }
+    if (!didMountRef.current && claimType === 'standby' && initialStandbyType) {
+      defaults.standbyType = initialStandbyType
+    }
+    didMountRef.current = true
     setFields(defaults)
     setBreakdown(null)
     setAdjustedAmount(null)
     setShowCalcLines(null)
     setError(null)
-  }, [claimType, profile])
+    setRecallHomeMeta(null)
+    setRecallStnMeta(null)
+    setStandbyTravelMeta(null)
+  }, [claimType, profile, initialStandbyType])
 
   // Auto-calculate on field/rate change
   useEffect(() => {
@@ -528,7 +758,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         result = calcRetainClaim({
           retainAmount:  num(fields.retainAmount),
           overnightCash: num(fields.overnightCash),
-        })
+          shift:         fields.shift,
+          bookedOffTime: fields.bookedOffTime,
+        }, rates)
       } else if (claimType === 'standby') {
         const hasNightMeal = isStandbyNightMealEligible({
           standbyType: fields.standbyType,
@@ -573,13 +805,13 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         incidentTime: fields.incidentTime, mealInterrupted: fields.mealInterrupted,
         returnToStn: fields.returnToStn,
       }, rates)
-    } else if (breakdown) {
-      lines = [
-        '-- Retain --',
-        'Retain allowance: $' + breakdown.retainAmount.toFixed(2),
-        breakdown.overnightCash > 0 ? 'Overnight cash: $' + breakdown.overnightCash.toFixed(2) : '',
-        '-- Total: $' + breakdown.totalAmount.toFixed(2) + ' --',
-      ].filter(Boolean)
+    } else if (claimType === 'retain') {
+      lines = buildRetainCalcLines({
+        retainAmount:  num(fields.retainAmount),
+        overnightCash: num(fields.overnightCash),
+        shift:         fields.shift,
+        bookedOffTime: fields.bookedOffTime,
+      }, rates)
     }
     setShowCalcLines(lines)
   }
@@ -615,6 +847,11 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         { mealType: 'Delayed', shift: fields.shift, incidentTime: fields.incidentTime, mealInterrupted: fields.mealInterrupted, returnToStn: fields.returnToStn },
         rates
       )
+    } else if (claimType === 'retain') {
+      calcLines = buildRetainCalcLines(
+        { retainAmount: num(fields.retainAmount), overnightCash: num(fields.overnightCash), shift: fields.shift, bookedOffTime: fields.bookedOffTime },
+        rates
+      )
     }
 
     const enrichedBreakdown = {
@@ -625,6 +862,15 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       calcSnapshot: buildCalcSnapshot(claimType, calcLines, rates),
     }
 
+    // Routing provenance, only relevant for claim types that auto-calculate
+    // a distance. Persisted by ClaimsContext into the new additive columns
+    // (google_km_*, matrix_hours, routing_source, travel_calc_at).
+    const routingMeta = claimType === 'recalls'
+      ? { home: recallHomeMeta, stn: recallStnMeta }
+      : claimType === 'standby'
+        ? { standby: standbyTravelMeta }
+        : null
+
     setSubmitting(true)
     try {
       await addClaim({
@@ -634,6 +880,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         breakdown: enrichedBreakdown,
         fields,
         rates,
+        routingMeta,
         financialYearId: financialYearId || null,
       })
       onSuccess?.()
@@ -674,9 +921,15 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
       </div>
 
-      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} />}
-      {claimType === 'retain'       && <RetainInputs  values={fields} onChange={handleFieldChange} />}
-      {claimType === 'standby'      && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} />}
+      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} />}
+      {claimType === 'retain'       && (
+        <RetainInputs
+          values={fields}
+          onChange={handleFieldChange}
+          mealEligibility={calcRetainMealEligibility({ shift: fields.shift, bookedOffTime: fields.bookedOffTime })}
+        />
+      )}
+      {claimType === 'standby'      && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
       {(claimType === 'spoilt' || claimType === 'delayed_meal') && (
         <SpoiltInputs values={fields} onChange={handleFieldChange} claimType={claimType} />
       )}

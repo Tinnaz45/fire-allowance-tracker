@@ -12,7 +12,7 @@ This document is the canonical specification for every financial calculation in 
 
 All calculations are implemented in **`lib/calculations/engine.js`**.  
 All default rates are defined in **`lib/calculations/defaultRates.js`**.  
-User-editable rates are stored in Supabase table **`fire_allowance_user_rates`**.
+User-editable rates are stored in Supabase table **`fat.user_rates`**.
 
 **Golden rule:** No arithmetic on dollar amounts may appear anywhere in the app except inside `engine.js`.
 
@@ -216,7 +216,7 @@ Defined in `lib/calculations/defaultRates.js`. Used when a user has no saved ove
 
 ### User Overrides
 
-Stored in `fire_allowance_user_rates` (one row per user). Loaded by `RatesContext.js` and merged over defaults.
+Stored in `fat.user_rates` (one row per user). Loaded by `RatesContext.js` and merged over defaults.
 
 **How merging works:**
 ```js
@@ -322,7 +322,7 @@ These items require confirmation with the current enterprise agreement or pay of
 ## 12. How to Update Rates When the Award Changes
 
 1. Update `DEFAULT_RATES` in `lib/calculations/defaultRates.js` with the new values.
-2. Update the `default` values in `supabase-migration-rates.sql` to match (for new users).
+2. Update the column defaults on `fat.user_rates` in `supabase/fat-schema.sql` to match (for new users).
 3. Update this document with the new values and the review date.
 4. Notify existing users to review their saved rates in Settings (they will not auto-update).
 5. Run `node lib/calculations/validationScenarios.js` to verify all tests still pass.

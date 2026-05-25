@@ -3,7 +3,7 @@
 // ─── Allowance Rate Settings Page ─────────────────────────────────────────────
 // Allows users to view and edit their personal allowance rates.
 // Falls back to DEFAULT_RATES when no user overrides exist.
-// All changes are persisted to fire_allowance_user_rates in Supabase.
+// All changes are persisted to fat.user_rates in Supabase.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState } from 'react'

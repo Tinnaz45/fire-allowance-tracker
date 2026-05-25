@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# pre-commit — Fire Allowance Tracker
+# Blocks commits containing corrupted, truncated, or syntactically invalid source files.
+#
+# Checks performed (staged files only):
+#   1. Empty file detection       — staged JS/JSX/MJS files with 0 bytes are rejected
+#   2. Truncation detection       — staged JS/JSX/MJS files under 20 bytes are rejected
+#   3. JS syntax validation       — node --check on staged .js/.mjs files
+#   4. JSX lint validation        — next lint --file on staged .jsx files (ESLint/React rules)
+#   5. JSON validity              — package.json validated with node -e JSON.parse
+#
+# To bypass in a genuine emergency:  git commit --no-verify
+# To reinstall after clone:          npm install  (runs scripts/install-hooks.mjs via "prepare")
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+ERRORS=0
+
+echo ""
+echo "🔍  pre-commit: validating staged files..."
+
+# ── 1 & 2: Empty / truncated JS file detection ───────────────────────────────
+# Get staged JS/JSX/MJS files (Added or Modified, not Deleted)
+STAGED_JS=$(git diff --cached --name-only --diff-filter=AM | grep -E '\.(js|jsx|mjs)$' || true)
+
+for file in $STAGED_JS; do
+  if [ ! -f "$file" ]; then
+    continue
+  fi
+
+  SIZE=$(wc -c < "$file" | tr -d ' ')
+
+  if [ "$SIZE" -eq 0 ]; then
+    echo -e "  ${RED}✗ EMPTY FILE${NC}: $file (0 bytes) — commit blocked"
+    ERRORS=$((ERRORS + 1))
+    continue
+  fi
+
+  if [ "$SIZE" -lt 20 ]; then
+    echo -e "  ${RED}✗ TRUNCATED${NC}: $file ($SIZE bytes) — suspiciously short, commit blocked"
+    ERRORS=$((ERRORS + 1))
+    continue
+  fi
+
+  # ── 3: JS syntax check ───────────────────────────────────────────────────
+  # node --check validates syntax without executing the file.
+  # JSX files are handled separately by next lint below.
+  if [[ "$file" == *.js || "$file" == *.mjs ]]; then
+    if ! node --check "$file" 2>/dev/null; then
+      echo -e "  ${RED}✗ SYNTAX ERROR${NC}: $file — node --check failed, commit blocked"
+      node --check "$file" 2>&1 | sed 's/^/     /' || true
+      ERRORS=$((ERRORS + 1))
+    fi
+  fi
+done
+
+# ── 4: JSX lint validation ────────────────────────────────────────────────────
+# Run next lint against staged .jsx files only — catches structural JSX errors
+# (sibling returns, unclosed tags, malformed conditionals) that node --check cannot.
+# Fails hard if node_modules is absent — prevents bypassing JSX validation on a fresh clone.
+# Fix: run  npm install  then re-stage and commit.
+STAGED_JSX=$(git diff --cached --name-only --diff-filter=AM | grep -E '\.jsx$' || true)
+
+if [ -n "$STAGED_JSX" ]; then
+  if [ ! -x "node_modules/.bin/next" ]; then
+    echo -e "  ${RED}✗ JSX LINT BLOCKED${NC}: node_modules not found — run: npm install"
+    echo -e "  ${YELLOW}  Cannot validate staged .jsx files without ESLint. Commit blocked.${NC}"
+    ERRORS=$((ERRORS + 1))
+  else
+    # Build --file args for each staged JSX file
+    FILE_ARGS=""
+    for file in $STAGED_JSX; do
+      if [ -f "$file" ]; then
+        FILE_ARGS="$FILE_ARGS --file $file"
+      fi
+    done
+
+    if [ -n "$FILE_ARGS" ]; then
+      echo -e "  Linting staged JSX files..."
+      # shellcheck disable=SC2086
+      if ! node_modules/.bin/next lint $FILE_ARGS --quiet 2>&1 | sed 's/^/     /'; then
+        echo -e "  ${RED}✗ JSX LINT FAILED${NC}: fix errors above, commit blocked"
+        ERRORS=$((ERRORS + 1))
+      fi
+    fi
+  fi
+fi
+
+# ── 5: package.json JSON validity ────────────────────────────────────────────
+if git diff --cached --name-only --diff-filter=AM | grep -q '^package\.json$'; then
+  if ! node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))" 2>/dev/null; then
+    echo -e "  ${RED}✗ INVALID JSON${NC}: package.json — commit blocked"
+    ERRORS=$((ERRORS + 1))
+  fi
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+if [ "$ERRORS" -gt 0 ]; then
+  echo ""
+  echo -e "  ${RED}✗ pre-commit FAILED — $ERRORS error(s). Commit blocked.${NC}"
+  echo -e "  ${YELLOW}  Fix the files above, then re-stage and commit.${NC}"
+  echo -e "  ${YELLOW}  Emergency bypass: git commit --no-verify (use sparingly)${NC}"
+  echo ""
+  exit 1
+fi
+
+echo -e "  ${GREEN}✓ All staged files passed validation.${NC}"
+echo ""
+exit 0

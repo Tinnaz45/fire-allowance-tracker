@@ -1,0 +1,46 @@
+
+> fire-allowance-tracker@0.1.0 dev
+> next dev -p 3001
+
+   ▲ Next.js 15.5.15
+   - Local:        http://localhost:3001
+   - Network:      http://192.168.86.37:3001
+   - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 1187ms
+ ○ Compiling / ...
+ ✓ Compiled / in 2.3s (699 modules)
+ ⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 2712ms
+ ✓ Compiled in 258ms (308 modules)
+ ✓ Compiled in 81ms (308 modules)
+ ✓ Compiled in 93ms (308 modules)
+ ✓ Compiled in 100ms (309 modules)
+ ✓ Compiled in 82ms (309 modules)
+ ✓ Compiled in 75ms (309 modules)
+ ✓ Compiled in 97ms (309 modules)
+ ✓ Compiled in 95ms (309 modules)
+ ✓ Compiled in 237ms (309 modules)
+ ✓ Compiled / in 137ms (392 modules)
+ ⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 334ms
+ ⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 55ms
+ ✓ Compiled in 267ms (701 modules)
+ ✓ Compiled in 184ms (701 modules)
+ ✓ Compiled in 241ms (701 modules)
+ ✓ Compiled in 182ms (701 modules)
+ ✓ Compiled in 210ms (701 modules)
+ ✓ Compiled in 171ms (701 modules)
+ ✓ Compiled in 206ms (701 modules)
+ ✓ Compiled in 58ms (309 modules)
+ ✓ Compiled in 173ms (701 modules)
+ ✓ Compiled in 346ms (701 modules)
+ ✓ Compiled in 144ms (701 modules)
+ ⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 183ms

@@ -289,6 +289,16 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
       </div>
 
       <div style={FIELD}>
+        <label style={LABEL_STYLE}>Arrival Time (24hr)</label>
+        <TimeInput24
+          value={values.arrivalTime}
+          onChange={(v) => onChange('arrivalTime', v)}
+          required
+        />
+        <p style={HELP_STYLE}>24hr time you arrived at the recall station, e.g. 08:30 or 19:30.</p>
+      </div>
+
+      <div style={FIELD}>
         <label style={LABEL_STYLE}>Meal Entitlement</label>
         <select value={values.mealEntitlement}
           onChange={(e) => onChange('mealEntitlement', e.target.value)}
@@ -440,7 +450,7 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
           Day never qualifies for a meal; the time is captured for audit. */}
       {!isMD && (
         <div style={FIELD}>
-          <label style={LABEL_STYLE}>Time Arrived (24hr)</label>
+          <label style={LABEL_STYLE}>Arrival Time (24hr)</label>
           <TimeInput24
             value={values.arrivedTime}
             onChange={(v) => onChange('arrivedTime', v)}
@@ -545,23 +555,6 @@ function SpoiltInputs({ values, onChange, claimType }) {
           </div>
         )}
       </div>
-
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Meal Interrupted At (optional)</label>
-        <TimeInput24
-          value={values.mealInterrupted}
-          onChange={(v) => onChange('mealInterrupted', v)}
-        />
-      </div>
-
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Return to Station (optional)</label>
-        <TimeInput24
-          value={values.returnToStn}
-          onChange={(v) => onChange('returnToStn', v)}
-        />
-        <p style={HELP_STYLE}>These times are for your records only. They do not affect the claim amount.</p>
-      </div>
     </>
   )
 }
@@ -569,12 +562,12 @@ function SpoiltInputs({ values, onChange, claimType }) {
 // ─── Default values per type ──────────────────────────────────────────────────
 
 const DEFAULTS = {
-  recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
+  recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', arrivalTime: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
   retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '', shift: 'Day', bookedOffTime: '' },
   standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
   md:           { standbyType: 'M&D',     standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
-  spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
-  delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', mealInterrupted: '', returnToStn: '' },
+  spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '' },
+  delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '' },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -757,14 +750,12 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     } else if (claimType === 'spoilt') {
       lines = buildSpoiltCalcLines({
         mealType: fields.mealType, shift: fields.shift,
-        incidentTime: fields.incidentTime, mealInterrupted: fields.mealInterrupted,
-        returnToStn: fields.returnToStn,
+        incidentTime: fields.incidentTime,
       }, rates)
     } else if (claimType === 'delayed_meal') {
       lines = buildSpoiltCalcLines({
         mealType: 'Delayed', shift: fields.shift,
-        incidentTime: fields.incidentTime, mealInterrupted: fields.mealInterrupted,
-        returnToStn: fields.returnToStn,
+        incidentTime: fields.incidentTime,
       }, rates)
     } else if (claimType === 'retain') {
       lines = buildRetainCalcLines({
@@ -781,17 +772,29 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     e.preventDefault()
     setError(null)
     if (!date) { setError('Please select a date.'); return }
-    if (claimType === 'standby' && fields.standbyType === 'Standby') {
-      // Accept HH:MM (current UI) and HHMM (legacy / direct entry).
-      const at = (fields.arrivedTime || '').replace(/\D/g, '')
+    if (claimType === 'recalls') {
+      const at = (fields.arrivalTime || '').replace(/\D/g, '')
       if (!at) {
-        setError('Time Arrived is required for Standby claims (both Day and Night shifts).'); return
+        setError('Arrival Time is required for Recall claims.'); return
       }
       const padded = at.padStart(4, '0')
       const h = parseInt(padded.slice(0, 2), 10)
       const m = parseInt(padded.slice(2, 4), 10)
       if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) {
-        setError('Time Arrived must be a valid 24hr time (e.g. 08:30, 19:30).'); return
+        setError('Arrival Time must be a valid 24hr time (e.g. 08:30, 19:30).'); return
+      }
+    }
+    if (claimType === 'standby' && fields.standbyType === 'Standby') {
+      // Accept HH:MM (current UI) and HHMM (legacy / direct entry).
+      const at = (fields.arrivedTime || '').replace(/\D/g, '')
+      if (!at) {
+        setError('Arrival Time is required for Standby claims (both Day and Night shifts).'); return
+      }
+      const padded = at.padStart(4, '0')
+      const h = parseInt(padded.slice(0, 2), 10)
+      const m = parseInt(padded.slice(2, 4), 10)
+      if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) {
+        setError('Arrival Time must be a valid 24hr time (e.g. 08:30, 19:30).'); return
       }
     }
     if (!breakdown || breakdown.totalAmount <= 0) {
@@ -813,12 +816,12 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       )
     } else if (claimType === 'spoilt') {
       calcLines = buildSpoiltCalcLines(
-        { mealType: fields.mealType, shift: fields.shift, incidentTime: fields.incidentTime, mealInterrupted: fields.mealInterrupted, returnToStn: fields.returnToStn },
+        { mealType: fields.mealType, shift: fields.shift, incidentTime: fields.incidentTime },
         rates
       )
     } else if (claimType === 'delayed_meal') {
       calcLines = buildSpoiltCalcLines(
-        { mealType: 'Delayed', shift: fields.shift, incidentTime: fields.incidentTime, mealInterrupted: fields.mealInterrupted, returnToStn: fields.returnToStn },
+        { mealType: 'Delayed', shift: fields.shift, incidentTime: fields.incidentTime },
         rates
       )
     } else if (claimType === 'retain') {

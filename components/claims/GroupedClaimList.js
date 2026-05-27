@@ -14,16 +14,21 @@ import {
   isClaimOverdue,
   formatDateDDMMYY,
 } from '@/lib/calculations/engine'
+import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 
 function resolveChildLabel(claim) {
   const ai = claim.calculation_inputs || {}
-  if (ai.autoChild === 'callback_ops')           return 'Callback-Ops'
-  if (ai.autoChild === 'excess_travel')           return 'Excess Travel'
-  if (ai.autoChild === 'petty_cash_meal')         return 'Petty cash meal'
-  if (ai.autoChild === 'petty_cash_travel_night') return 'Petty cash travel (night)'
-  if (ai.autoChild === 'maint_stn_nn')            return 'Maint stn N/N'
-  if (ai.autoChild === 'overnight_cash')          return 'Overnight cash'
-  if (ai.autoChild === 'standby_travel')          return 'Standby travel'
+  if (ai.autoChild === 'callback_ops')             return 'Callback-Ops'
+  if (ai.autoChild === 'excess_travel')             return 'Excess Travel'
+  if (ai.autoChild === 'petty_cash_meal')           return 'Petty cash meal'
+  if (ai.autoChild === 'petty_cash_travel_night')   return 'Small Meal Allowance' // legacy slug
+  if (ai.autoChild === 'standby_small_meal')        return 'Small Meal Allowance'
+  if (ai.autoChild === 'maint_stn_nn')              return 'Maint stn N/N'
+  if (ai.autoChild === 'overnight_cash')            return 'Overnight cash'
+  if (ai.autoChild === 'standby_travel')            return 'Excess Travel' // legacy slug
+  if (ai.autoChild === 'standby_excess_travel')     return 'Excess Travel'
+  if (ai.autoChild === 'standby_and_dismi')         return 'Standby&Dismi'
+  if (ai.autoChild === 'md_event')                  return 'M&D'
   return CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType
 }
 
@@ -79,14 +84,23 @@ function QuickPayToggle({ claim, session, activeFY }) {
   const { updatePaymentStatus } = useClaims()
   const [toggling, setToggling] = useState(false)
   const [hasError, setHasError] = useState(false)
+  const [showPayNbrModal, setShowPayNbrModal] = useState(false)
 
   const isPaid = (claim.payment_status || '').toLowerCase() === 'paid'
 
   // Only visible for unpaid subclaims
   if (isPaid) return null
 
-  const handleMarkPaid = async () => {
+  // Payslip-method rows require a Pay Number at mark-as-paid time.
+  const needsPayNumber =
+    claim.payment_method === 'Payslip' && !claim.payslip_pay_nbr
+
+  const handleClick = async () => {
     if (toggling || !session) return
+    if (needsPayNumber) {
+      setShowPayNbrModal(true)
+      return
+    }
     setToggling(true)
     setHasError(false)
     try {
@@ -99,9 +113,20 @@ function QuickPayToggle({ claim, session, activeFY }) {
     }
   }
   return (
-    <button onClick={handleMarkPaid} disabled={toggling} title="Mark as Paid" style={{ padding: '3px 9px', borderRadius: '6px', border: hasError ? '1px solid rgba(239,68,68,0.5)' : '1px solid rgba(34,197,94,0.4)', background: hasError ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)', color: hasError ? '#f87171' : '#86efac', fontSize: '0.7rem', fontWeight: 700, cursor: toggling ? 'wait' : 'pointer', opacity: toggling ? 0.6 : 1, flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '3px', transition: 'opacity 0.15s', whiteSpace: 'nowrap' }}>
-      {toggling ? '…' : hasError ? '✕ Retry' : 'Mark Paid'}
-    </button>
+    <>
+      <button onClick={handleClick} disabled={toggling} title={needsPayNumber ? 'Mark as Paid (Pay Number required)' : 'Mark as Paid'} style={{ padding: '3px 9px', borderRadius: '6px', border: hasError ? '1px solid rgba(239,68,68,0.5)' : '1px solid rgba(34,197,94,0.4)', background: hasError ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)', color: hasError ? '#f87171' : '#86efac', fontSize: '0.7rem', fontWeight: 700, cursor: toggling ? 'wait' : 'pointer', opacity: toggling ? 0.6 : 1, flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '3px', transition: 'opacity 0.15s', whiteSpace: 'nowrap' }}>
+        {toggling ? '…' : hasError ? '✕ Retry' : 'Mark Paid'}
+      </button>
+      {showPayNbrModal && (
+        <MarkPaidPayNumberModal
+          claim={claim}
+          session={session}
+          activeFY={activeFY}
+          onClose={() => setShowPayNbrModal(false)}
+          onSuccess={() => setShowPayNbrModal(false)}
+        />
+      )}
+    </>
   )
 }
 

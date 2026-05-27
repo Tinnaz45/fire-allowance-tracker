@@ -1,10 +1,10 @@
 # Fire Allowance Tracker — Financial Verification Checklist
 
-**Version:** 1.1  
-**Created:** 2026-05  
-**Last updated:** 2026-05 (large meal, double meal, spoilt meal corrected from FRV historical allowance records; delayed meal flagged UNRESOLVED)  
-**Purpose:** Pre-production verification of all allowance rates and calculation formulas against the current FBEU Enterprise Agreement and real payslip examples.  
-**Status:** 🔴 NOT CLEARED FOR PRODUCTION — unresolved assumptions remain (see §3 and §4).
+**Version:** 1.2
+**Created:** 2026-05
+**Last updated:** 2026-05 (canonical-rate refactor — only `kilometreRate`, `smallMealAllowance`, and `largeMealAllowance` remain editable; double meal is derived; spoilt, delayed, and standby-night meals all source `smallMealAllowance`; overnight cash is captured per-claim, not as a rate)
+**Purpose:** Pre-production verification of all allowance rates and calculation formulas against the current FBEU Enterprise Agreement and real payslip examples.
+**Status:** 🟡 NOT CLEARED FOR PRODUCTION — unresolved assumptions remain (see §3 and §4).
 
 ---
 
@@ -23,19 +23,19 @@
 
 These rates have been confirmed from the FRV historical allowance sheets (FRV Allowances 2023FY, 2025FY, and Current).
 
-| Rate | Confirmed Value | Source |
-|---|---|---|
-| Small Meal Allowance | $10.90 | User-confirmed from FBEU EA, 2025; also in FRV allowance sheets |
-| Kilometre Rate | $1.20/km | User-confirmed from FBEU EA, 2025; also in FRV allowance sheets |
-| Large Meal Allowance | $20.55 | Confirmed FRV Allowances 2023FY, 2025FY, Current — flat rate, NOT 2× small |
-| Double Meal Allowance | $31.45 | Confirmed FRV Allowances 2023FY, 2025FY, Current |
-| Spoilt Meal Allowance | $10.90 | Confirmed FRV Allowances 2023FY, 2025FY, Current |
+| Rate | Confirmed Value | Editable? | Source |
+|---|---|---|---|
+| Kilometre Rate (`kilometreRate`) | $1.20/km | ✅ Canonical | User-confirmed from FBEU EA, 2025; also in FRV allowance sheets |
+| Small Meal Allowance (`smallMealAllowance`) | $10.90 | ✅ Canonical | User-confirmed from FBEU EA, 2025; also in FRV allowance sheets. Also drives Spoilt, Delayed, Standby-Night, and Retain-small meals. |
+| Large Meal Allowance (`largeMealAllowance`) | $20.55 | ✅ Canonical | Confirmed FRV Allowances 2023FY, 2025FY, Current — flat rate, NOT 2× small. Also drives Retain-large and the derived double meal. |
+| Double Meal Allowance | $31.45 | ❌ Derived | Confirmed FRV Allowances 2023FY, 2025FY, Current. Computed at calculation time as `smallMealAllowance + largeMealAllowance`; there is no editable `doubleMealAllowance` rate. |
+| Spoilt Meal Allowance | $10.90 | ❌ Sourced | Confirmed FRV Allowances 2023FY, 2025FY, Current. Sourced from canonical `smallMealAllowance`; there is no editable `spoiltMealAllowance` rate. |
 
 ---
 
 ## §2 — Rate Verification Table
 
-Each rate below appears in `lib/calculations/defaultRates.js` and is used by `engine.js`.
+The canonical-rate refactor leaves only three editable rates in `lib/calculations/defaultRates.js` (see `RATE_FIELDS`). All other meal-allowance values are derived at calculation time inside `engine.js`, and overnight cash is captured per-claim.
 
 ### 2.1 Travel
 
@@ -45,46 +45,41 @@ Each rate below appears in `lib/calculations/defaultRates.js` and is used by `en
 
 ---
 
-### 2.2 Recall Meal Allowances
+### 2.2 Canonical Meal Allowances (editable)
 
 | Rate Key | App Value | Source Status | EA Clause / Evidence Needed | Risk if Wrong | Testing Status |
 |---|---|---|---|---|---|
-| `smallMealAllowance` | $10.90 | ✅ CONFIRMED | User-confirmed from FBEU EA 2025; also in FRV Allowances 2023FY, 2025FY, Current | LOW — confirmed | ✅ Covered by validation scenarios |
-| `largeMealAllowance` | $20.55 | ✅ CONFIRMED | Confirmed from FRV Allowances 2023FY, 2025FY, and Current. **Flat rate — not derived from small meal.** Previous derived assumption of $21.80 (2× small) has been corrected. | LOW — confirmed | ✅ Covered by validation scenarios |
-| `doubleMealAllowance` | $31.45 | ✅ CONFIRMED | Confirmed from FRV Allowances 2023FY, 2025FY, and Current. | LOW — confirmed | ✅ Covered by validation scenarios |
+| `smallMealAllowance` | $10.90 | ✅ CONFIRMED | User-confirmed from FBEU EA 2025; also in FRV Allowances 2023FY, 2025FY, Current. **Also drives Spoilt, Delayed, Standby-Night, and Retain-small meals.** | LOW — confirmed | ✅ Covered by validation scenarios |
+| `largeMealAllowance` | $20.55 | ✅ CONFIRMED | Confirmed from FRV Allowances 2023FY, 2025FY, and Current. **Flat rate — not derived from small meal.** Previous derived assumption of $21.80 (2× small) has been corrected. Also drives Retain-large meals and the derived double meal. | LOW — confirmed | ✅ Covered by validation scenarios |
 
 ---
 
-### 2.3 Spoilt / Delayed Meal Allowances
+### 2.3 Derived / Sourced Meal Allowances (not editable rates)
 
-| Rate Key | App Value | Source Status | EA Clause / Evidence Needed | Risk if Wrong | Testing Status |
-|---|---|---|---|---|---|
-| `spoiltMealAllowance` | $10.90 | ✅ CONFIRMED | Confirmed from FRV Allowances 2023FY, 2025FY, and Current. Previous value of $22.80 (SQL schema default of unknown origin) has been corrected. Historical claims at $22.80 are preserved as-is. | LOW — confirmed | ✅ Covered by validation scenarios |
-| `delayedMealAllowance` | $10.90 | ⚠️ UNRESOLVED | **No FRV historical evidence found for delayed meal rate. Current value ($10.90) is a placeholder only. Find the EA clause for "delayed meal" (held past rostered break). Confirm whether it equals Spoilt ($10.90) or is a different amount.** | HIGH — all Delayed claims will use unconfirmed placeholder | ❌ No real-world example to verify; flagged UNRESOLVED |
+These allowances were previously editable rates and have been **removed** from `defaultRates.js`. They are now derived at calculation time from `smallMealAllowance` and/or `largeMealAllowance`.
 
-> **Note (Spoilt):** Rate corrected from $22.80 (unknown-origin SQL default) to $10.90 (confirmed FRV). Historical Spoilt claims stored at $22.80 are unaffected — they are protected by historical claim preservation logic.
+| Allowance | Sourced From | Computed Value | EA Status | Risk |
+|---|---|---|---|---|
+| Double meal | `smallMealAllowance + largeMealAllowance` | $31.45 | ✅ CONFIRMED — FRV Allowances 2023FY, 2025FY, Current confirm the sum equals the published double meal value | LOW |
+| Spoilt meal | `smallMealAllowance` | $10.90 | ✅ CONFIRMED — FRV Allowances 2023FY, 2025FY, Current. Previous $22.80 (SQL schema default of unknown origin) has been corrected. Historical claims at $22.80 are preserved as-is. | LOW |
+| Delayed meal | `smallMealAllowance` | $10.90 | ⚠️ UNRESOLVED — no separate FRV evidence found. The engine collapses Delayed onto the small-meal rate pending EA confirmation. If a distinct value is confirmed, introduce a new canonical rate at that time. | HIGH for Delayed claims |
+| Standby-night meal | `smallMealAllowance` | $10.90 | ⚠️ ASSUMED — confirm the EA clause and that it applies equally to Standby vs M&D. The engine gates eligibility on `isStandbyNightMealEligible()` (Night shift, arrival ≥ 19:00, never M&D). | MEDIUM |
+
+> **Note (Spoilt):** No regression — the runtime simply reads `smallMealAllowance` instead of the removed `spoiltMealAllowance` key. Historical Spoilt claims stored at $22.80 are unaffected; they are protected by historical claim preservation logic.
 >
-> **Note (Delayed):** Rate is unresolved. No FRV evidence found. Placeholder of $10.90 is used. Do not rely on Delayed claim calculations for compliance until this is confirmed from the enterprise agreement.
+> **Note (Delayed):** Rate is unresolved. No FRV evidence found. The runtime sources `smallMealAllowance`. Do not rely on Delayed claim calculations for compliance until this is confirmed from the enterprise agreement.
 
 ---
 
-### 2.4 Standby Night Meal
+### 2.4 Overnight Cash (per-claim, not a rate)
 
-| Rate Key | App Value | Source Status | EA Clause / Evidence Needed | Risk if Wrong | Testing Status |
+| Field | Where Captured | Source Status | EA Clause / Evidence Needed | Risk if Wrong | Testing Status |
 |---|---|---|---|---|---|
-| `standbyNightMealAllowance` | $10.90 | ⚠️ ASSUMED | **Assumed to equal smallMealAllowance. Find the EA clause for standby night meal. Confirm it applies equally to Standby and M&D claim types.** | MEDIUM — may be under-paying for night standby claims | ❌ No real-world example to verify |
+| `overnight_cash` (on Retain claims) | Per-claim form input | ❓ USER-ENTERED PER CLAIM | The previous `overnightAllowance` rate has been removed. Overnight cash varies per incident and is not a uniform award amount. Confirm: is there an EA-specified overnight rate that should be reintroduced as a canonical default, or does it remain a per-claim determination from pay advice? | MEDIUM — users must record the correct overnight amount per claim | ⚠️ Not tested against a real payslip example |
 
 ---
 
-### 2.5 Overnight Allowance
-
-| Rate Key | App Value | Source Status | EA Clause / Evidence Needed | Risk if Wrong | Testing Status |
-|---|---|---|---|---|---|
-| `overnightAllowance` | $0.00 (default) | ❓ USER-SET | **Default is $0. Users must set their own value in Settings. There is no universally confirmed amount.** Confirm: is there an EA-specified overnight rate, or is it determined per-incident / per-agreement with management? | MEDIUM — users who do not set this will have $0 overnight claims | ⚠️ Not tested against a real payslip example |
-
----
-
-### 2.6 Retain
+### 2.5 Retain
 
 | Rate Key | App Value | Source Status | EA Clause / Evidence Needed | Risk if Wrong | Testing Status |
 |---|---|---|---|---|---|
@@ -92,7 +87,7 @@ Each rate below appears in `lib/calculations/defaultRates.js` and is used by `en
 
 ---
 
-### 2.7 Non-Monetary Thresholds
+### 2.6 Non-Monetary Thresholds
 
 These are stored in `defaultRates.js` but not yet used in automated calculations (no auto-entitlement logic is implemented). They are flagged here for future confirmation.
 
@@ -109,17 +104,21 @@ These are stored in `defaultRates.js` but not yet used in automated calculations
 
 **Formula (engine.js `calcRecallClaim`):**
 ```
-total_km     = dist_home_km + dist_stn_km
+total_km      = (dist_home_km × 2) + (dist_stn_km × 2)   // return route
 travel_amount = round(total_km × kilometreRate)
-mealie_amount = round(mealAllowance[mealEntitlement])
+mealie_amount = calcMealAllowance({ mealEntitlement }, rates)
+                  small  → smallMealAllowance
+                  large  → largeMealAllowance
+                  double → smallMealAllowance + largeMealAllowance   // derived
 total_amount  = round(travel_amount + mealie_amount)
 ```
 
 | Check | Status | Notes |
 |---|---|---|
 | Travel: km × $1.20/km | ✅ Formula correct | Confirmed rate |
-| Meal: user self-selects none/small/large | ⚠️ ASSUMPTION | **EA likely specifies objective threshold (e.g. "if recall exceeds 4 hours, small meal applies"). Self-selection may not match award entitlement. Confirm the exact trigger conditions.** |
-| large meal = 2× small ($21.80) | ⚠️ ASSUMED | Confirm independently — see §2.2 |
+| Meal: user self-selects none/small/large/double | ⚠️ ASSUMPTION | **EA likely specifies objective threshold (e.g. "if recall exceeds 4 hours, small meal applies"). Self-selection may not match award entitlement. Confirm the exact trigger conditions.** |
+| Large meal = $20.55 flat (NOT 2× small) | ✅ Confirmed | Confirmed FRV — see §2.2 |
+| Double meal = small + large = $31.45 (derived) | ✅ Confirmed | Sum matches FRV double meal value; ATO tax decomposition = 1 small + 1 large via `calcMealTaxComponents()` |
 | total = travel + meal | ✅ Formula logically correct | No dispute |
 | Historical claims never recalculate | ✅ Implemented correctly | Verified in code |
 
@@ -129,14 +128,18 @@ total_amount  = round(travel_amount + mealie_amount)
 
 **Formula (engine.js `calcRetainClaim`):**
 ```
-total_amount = round(retainAmount + overnightCash)
+{ smallCount, largeCount } = calcRetainMealEligibility({ shift, bookedOffTime })
+meal_amount   = round((smallCount × smallMealAllowance) + (largeCount × largeMealAllowance))
+total_amount  = round(retainAmount + overnightCash + meal_amount)
 ```
 
 | Check | Status | Notes |
 |---|---|---|
 | retainAmount — base retain allowance | ❌ UNRESOLVED | **User-entered only. No formula implemented. EA formula unknown. Must be confirmed before this claim type is reliable.** |
-| overnightCash — overnight component | ⚠️ USER-ENTERED | User determines from their own pay advice. Correct by design, but verify with at least one real example. |
-| total = retain + overnight | ✅ Formula logically correct | Addition is correct; the issue is the input values |
+| overnightCash — overnight component | ⚠️ USER-ENTERED PER CLAIM | User determines from their own pay advice. The previous `overnightAllowance` rate has been removed; overnight cash is captured on the Retain form per claim. Verify with at least one real example. |
+| Retain-meal auto-derivation (`calcRetainMealEligibility`) | ⚠️ ASSUMED | Thresholds in `RETAIN_MEAL_THRESHOLDS` (Day → Large > 19:00, +Small > 22:00; Night → Large > 09:00, +Small > 13:00) need EA confirmation. |
+| Meal pricing = small/large canonical rates | ✅ Formula correct | No separate retain-meal rate; canonical rates only |
+| total = retain + overnight + meal | ✅ Formula logically correct | Addition is correct; the issue is the retain input value |
 
 ---
 
@@ -145,16 +148,18 @@ total_amount = round(retainAmount + overnightCash)
 **Formula (engine.js `calcStandbyClaim`):**
 ```
 travel_amount = round(dist_km × kilometreRate)
-night_mealie  = standbyNightMealAllowance  (if night shift)
-             = 0                          (if day shift)
+hasNightMeal  = isStandbyNightMealEligible({ standbyType, shift, arrivedTime })
+                  // false for M&D; Night shift only; arrival ≥ 19:00
+night_mealie  = hasNightMeal ? smallMealAllowance : 0
 total_amount  = round(travel_amount + night_mealie)
 ```
 
 | Check | Status | Notes |
 |---|---|---|
 | Travel: km × $1.20/km | ✅ Formula correct | Confirmed rate |
-| Night meal = standbyNightMealAllowance ($10.90) | ⚠️ ASSUMED | Confirm EA clause. Also confirm: does this apply equally to Standby and M&D type claims? |
-| Standby vs M&D — same rates? | ⚠️ ASSUMED | **App applies identical rates to both. Confirm the EA does not have a separate M&D rate.** |
+| Night meal sourced from `smallMealAllowance` ($10.90) | ⚠️ ASSUMED | Confirm EA clause for night meal value. |
+| Eligibility = Night shift AND arrival ≥ 19:00 AND not M&D | ⚠️ ASSUMED | Confirm against EA — particularly the 19:00 cutoff and the M&D exclusion |
+| Standby vs M&D — same travel rate? | ⚠️ ASSUMED | **App applies identical travel rates; M&D never carries a meal allowance. Confirm the EA does not have a separate M&D travel rate.** |
 | total = travel + night_mealie | ✅ Formula logically correct | No dispute |
 
 ---
@@ -163,32 +168,21 @@ total_amount  = round(travel_amount + night_mealie)
 
 **Formula (engine.js `calcSpoiltClaim`):**
 ```
-meal_amount  = rates.spoiltMealAllowance   (if Spoilt)
-             = rates.delayedMealAllowance  (if Delayed)
+meal_amount  = round(smallMealAllowance)   // for both Spoilt and Delayed
 total_amount = meal_amount
 ```
 
 | Check | Status | Notes |
 |---|---|---|
-| Spoilt = $22.80 | ⚠️ ASSUMED | Confirm EA clause — origin was a SQL schema default |
-| Delayed = $22.80 | ⚠️ ASSUMED | Same — confirm separately; may or may not equal Spoilt |
+| Spoilt = $10.90 (sourced from `smallMealAllowance`) | ✅ Confirmed | Confirmed FRV — see §2.3 |
+| Delayed = $10.90 (sourced from `smallMealAllowance`) | ⚠️ UNRESOLVED | No separate FRV evidence found; collapses onto small meal pending EA confirmation |
 | No travel component on spoilt/delayed | ✅ Appears correct | Spoilt/Delayed are meal-only claims |
 | total = meal only | ✅ Formula logically correct | No dispute |
+| Legacy `Spoilt / Meal` value normalised to `Spoilt` | ✅ Verified | `normaliseMealType()` handles legacy DB rows |
 
 ---
 
-### 3.5 Overnight Allowance (Recall sub-component)
-
-**Note:** In the current UI, overnight on recall is handled via the retain claim's `overnightCash` field (user-entered) and `calcOvernightAllowance()` in the engine. The `calcOvernightAllowance` function is implemented but not wired into recall directly — it's available for future use.
-
-| Check | Status | Notes |
-|---|---|---|
-| overnight = rates.overnightAllowance (if hasOvernight) | ✅ Formula correct | |
-| Default rate = $0.00 | ⚠️ USER-SET | User must configure. Verify against at least one real example. |
-
----
-
-### 3.6 Rounding
+### 3.5 Rounding
 
 | Check | Status | Notes |
 |---|---|---|
@@ -205,16 +199,17 @@ This is the consolidated list of everything that must be confirmed before the ap
 | # | Item | Current Value | Status | Priority | What to Provide |
 |---|---|---|---|---|---|
 | 1 | Large meal allowance | $20.55 | ✅ CONFIRMED | — | Confirmed from FRV Allowances 2023FY, 2025FY, Current. No further action needed. |
-| 2 | Double meal allowance | $31.45 | ✅ CONFIRMED | — | Confirmed from FRV Allowances 2023FY, 2025FY, Current. No further action needed. |
-| 3 | Spoilt meal allowance | $10.90 | ✅ CONFIRMED | — | Confirmed from FRV Allowances 2023FY, 2025FY, Current. No further action needed. |
-| 4 | Delayed meal allowance | $10.90 (placeholder) | ⚠️ UNRESOLVED | HIGH | No FRV evidence found. Find the EA clause for "delayed meal." Confirm whether it differs from Spoilt ($10.90). |
-| 5 | Standby night meal | $10.90 (= small) | ⚠️ ASSUMED | MEDIUM | EA clause + confirm Standby vs M&D |
+| 2 | Double meal allowance | $31.45 (derived = small + large) | ✅ CONFIRMED | — | Derived sum matches the published FRV double meal value. No editable rate. |
+| 3 | Spoilt meal allowance | $10.90 (sourced from `smallMealAllowance`) | ✅ CONFIRMED | — | Confirmed from FRV Allowances 2023FY, 2025FY, Current. No editable rate. |
+| 4 | Delayed meal allowance | $10.90 (sourced from `smallMealAllowance`) | ⚠️ UNRESOLVED | HIGH | No separate FRV evidence found. Confirm against EA whether Delayed differs from the small-meal value. |
+| 5 | Standby night meal | $10.90 (sourced from `smallMealAllowance`) | ⚠️ ASSUMED | MEDIUM | EA clause + confirm Standby vs M&D + 19:00 cutoff |
 | 6 | Retain allowance formula | User-entered; no auto-calc | ❌ UNRESOLVED | CRITICAL | EA clause describing the formula (hourly rate? flat? % of pay?) |
-| 7 | Overnight allowance default | $0.00 user-set | ❓ USER-SET | MEDIUM | Confirm whether EA specifies a standard rate |
+| 7 | Overnight cash | Captured per-claim; no rate | ❓ USER-ENTERED PER CLAIM | MEDIUM | Confirm whether EA specifies a standard rate that should be reintroduced as a canonical default |
 | 8 | Recall meal entitlement trigger | User self-selects none/small/large/double | ⚠️ ASSUMED | HIGH | EA clause defining hours threshold for none/small/large/double |
-| 9 | Standby vs M&D same rates? | Same rates applied | ⚠️ ASSUMED | MEDIUM | Confirm EA has no separate M&D rate |
-| 10 | Recall minimum hours | 3 hours (stored, unused) | ⚠️ ASSUMED | LOW | EA clause (not yet in calculations) |
-| 11 | Recall meal threshold hours | 4 hours (stored, unused) | ⚠️ ASSUMED | LOW | EA clause (not yet in calculations) |
+| 9 | Standby vs M&D same rates? | Same travel rate applied; M&D never meal-eligible | ⚠️ ASSUMED | MEDIUM | Confirm EA has no separate M&D travel rate |
+| 10 | Retain meal thresholds (`RETAIN_MEAL_THRESHOLDS`) | Day: Large > 19:00, +Small > 22:00; Night: Large > 09:00, +Small > 13:00 | ⚠️ ASSUMED | MEDIUM | EA clause for the booked-off thresholds that grant Large and Large+Small meal eligibility |
+| 11 | Recall minimum hours | 3 hours (stored, unused) | ⚠️ ASSUMED | LOW | EA clause (not yet in calculations) |
+| 12 | Recall meal threshold hours | 4 hours (stored, unused) | ⚠️ ASSUMED | LOW | EA clause (not yet in calculations) |
 
 ---
 
@@ -290,9 +285,9 @@ Instructions for each placeholder:
 | Meal type | _[Spoilt / Delayed]_ |
 | Date | _[to be provided]_ |
 | Amount on payslip | _[to be provided]_ |
-| App calculated amount | _[run app — should match spoiltMealAllowance or delayedMealAllowance]_ |
+| App calculated amount | _[run app — should match `smallMealAllowance` ($10.90) for both Spoilt and Delayed]_ |
 | Match? | _[Yes / No / Discrepancy: $X]_ |
-| Confirmed rate | _[update defaultRates.js if different from $22.80]_ |
+| Confirmed rate | _[If Delayed differs from $10.90, introduce a new canonical rate — do NOT reintroduce the removed `delayedMealAllowance` key]_ |
 | Notes | |
 
 ---
@@ -340,22 +335,22 @@ Instructions for each placeholder:
 
 The automated validation suite (`lib/calculations/validationScenarios.js`) covers internal arithmetic correctness. It does **not** verify that the rates themselves are correct — only that the formulas apply the rates consistently.
 
-| Scenario Group | Scenarios | Status | Notes |
-|---|---|---|---|
-| `roundMoney` | 5 | ✅ 5/5 passing | Unchanged |
-| Travel (`calcTravelAmount`, `calcTotalKm`) | 6 | ✅ 6/6 passing | Unchanged |
-| Meal allowances (`calcMealAllowance`, `calcSpoiltMealAmount`) | 8 | ✅ 8/8 passing | +1 new: double meal ($31.45); corrected expected values for large meal ($20.55) and spoilt ($10.90) |
-| Overnight | 2 | ✅ 2/2 passing | Unchanged |
-| Recall (`calcRecallClaim`) | 5 | ✅ 5/5 passing | +1 new: double meal recall scenario |
-| Retain (`calcRetainClaim`) | 3 | ✅ 3/3 passing | Unchanged |
-| Standby (`calcStandbyClaim`) | 3 | ✅ 3/3 passing | Unchanged |
-| Spoilt/Delayed (`calcSpoiltClaim`) | 2 | ✅ 2/2 passing | Expected values corrected: Spoilt→$10.90, Delayed→$10.90 (placeholder) |
-| `resolveStoredAmount` | 4 | ✅ 4/4 passing | Unchanged |
-| Dashboard (`calcDashboardSummary`) | 2 | ✅ 2/2 passing | Unchanged |
-| Rounding edge cases | 3 | ✅ 3/3 passing | Unchanged |
-| **TOTAL** | **43** | ✅ **43/43 passing** | +2 new scenarios vs v1.0 (double meal allowance; double meal recall) |
+| Scenario Group | Coverage |
+|---|---|
+| `roundMoney` | float drift, half-up rounding, null and NaN guards |
+| Travel (`calcTravelAmount`, `calcTotalKm`) | typical/fractional/zero/large distances, home+station summing |
+| Meal allowances (`calcMealAllowance`, `calcDoubleMealAllowance`) | none/small/large; derived double meal (small + large); missing-rates and unknown-type guards |
+| Spoilt/Delayed (`calcSpoiltMealAmount`, `calcSpoiltClaim`, `normaliseMealType`) | Spoilt and Delayed both source `smallMealAllowance`; legacy `Spoilt / Meal` normalisation |
+| Recall (`calcRecallClaim`) | typical recall, travel-only, small/large/double meal at zero km, all-zero |
+| Retain (`calcRetainClaim`) | retain + overnight, retain only, all-zero |
+| Standby (`calcStandbyClaim`) | day/night, with/without travel |
+| `resolveStoredAmount` | column priority cascade including all-null |
+| Dashboard (`calcDashboardSummary`) | mixed claim types, empty input |
+| Rounding edge cases | 7.5 km precision, sum stability, rate-change impact |
 
-> All 43 scenarios test formula correctness using the rates as configured. Passing all 43 does not mean all rates are correct — it means the formulas are internally consistent. Delayed meal allowance remains flagged UNRESOLVED.
+Run `node lib/calculations/validationScenarios.js` for the live pass/fail count. The validation suite was updated alongside the canonical-rate refactor — only the three canonical rates are seeded into `TEST_RATES`, and the Spoilt/Delayed/Standby-night/double-meal scenarios assert the derived values.
+
+> Validation scenarios test formula correctness using the rates as configured. Passing them does not mean all rates are correct — it means the formulas are internally consistent. Delayed meal allowance remains flagged UNRESOLVED.
 
 ---
 
@@ -367,36 +362,39 @@ The automated validation suite (`lib/calculations/validationScenarios.js`) cover
 | Rounding | ✅ Correct | No |
 | Historical claim protection | ✅ Implemented correctly | No |
 | Rate snapshot on each claim | ✅ Implemented | No |
+| Canonical rate model (only `kilometreRate`, `smallMealAllowance`, `largeMealAllowance` editable) | ✅ Implemented | No — derived/sourced allowances now compute at calculation time |
 | km rate ($1.20/km) | ✅ Confirmed | No |
 | Small meal ($10.90) | ✅ Confirmed | No |
-| Large meal ($20.55) | ✅ Confirmed (FRV records) | No — corrected from $21.80 |
-| Double meal ($31.45) | ✅ Confirmed (FRV records) | No — newly added |
-| Spoilt meal ($10.90) | ✅ Confirmed (FRV records) | No — corrected from $22.80 |
-| Delayed meal ($10.90) | ⚠️ UNRESOLVED (placeholder) | **Yes — no FRV evidence; all Delayed claims use unconfirmed value** |
-| Standby night meal ($10.90) | ⚠️ Unconfirmed | **Yes — used on every night standby** |
-| Retain formula | ❌ Unresolved | **Yes — no auto-calc; manual entry only** |
-| Overnight default | ❓ User-set | Partial — users must configure themselves |
+| Large meal ($20.55) | ✅ Confirmed (FRV records) | No |
+| Double meal ($31.45 derived) | ✅ Confirmed | No — derived = small + large |
+| Spoilt meal ($10.90 sourced from small) | ✅ Confirmed | No |
+| Delayed meal ($10.90 sourced from small) | ⚠️ UNRESOLVED | **Yes — no separate FRV evidence; runtime sources `smallMealAllowance` pending EA confirmation** |
+| Standby night meal ($10.90 sourced from small) | ⚠️ Unconfirmed | **Yes — used on every eligible night standby** |
+| Retain formula | ❌ Unresolved | **Yes — no auto-calc; retain_amount manual entry only (meal is auto-derived)** |
+| Overnight cash (per-claim) | ❓ User-entered per claim | Partial — captured on the Retain form per claim; no rate-level default |
 | Real-world payslip verification | ❌ Not yet done | **Yes — no real examples tested** |
 
 ### Overall Status
 
-> 🟡 **NOT CLEARED FOR PRODUCTION — Significantly improved; two blockers remain**
+> 🟡 **NOT CLEARED FOR PRODUCTION — Significantly improved; two rate blockers remain**
 >
-> The app is **mechanically correct** — formulas and rounding are sound, historical claims are protected, and 44/44 validation scenarios pass. Following confirmation from FRV historical allowance records, **4 of 7 dollar amounts are now confirmed** (small meal, large meal, double meal, spoilt meal, km rate). **Two rate-related blockers remain** (delayed meal and standby night meal).
+> The app is **mechanically correct** — formulas and rounding are sound, historical claims are protected, and the validation suite passes. After the canonical-rate refactor the editable rate surface has shrunk to three keys (`kilometreRate`, `smallMealAllowance`, `largeMealAllowance`); every other meal value is derived or sourced from these, and overnight cash is captured per-claim.
 >
 > **Confirmed since last review (2026-05):**
 > - Large meal: $21.80 → corrected to $20.55 (confirmed FRV flat rate — not 2× small)
-> - Double meal: $31.45 added (confirmed FRV)
-> - Spoilt meal: $22.80 → corrected to $10.90 (confirmed FRV)
+> - Double meal: $31.45 (derived = small + large; matches FRV)
+> - Spoilt meal: $22.80 → corrected to $10.90 (sourced from canonical `smallMealAllowance`)
+> - Removed editable rates: `doubleMealAllowance`, `spoiltMealAllowance`, `delayedMealAllowance`, `standbyNightMealAllowance`, `overnightAllowance`
 >
 > **Minimum required before production use:**
 > 1. ~~Confirm large meal allowance~~ ✅ DONE — $20.55 confirmed
-> 2. ~~Confirm spoilt meal allowance~~ ✅ DONE — $10.90 confirmed
-> 3. Confirm delayed meal allowance from EA → update `defaultRates.js` (current placeholder: $10.90 — UNRESOLVED)
-> 4. Confirm standby night meal allowance from EA → update `defaultRates.js` if different from $10.90
-> 5. Complete at least one real-world payslip comparison for each claim type
-> 6. Optionally: confirm retain formula so it can be auto-calculated
+> 2. ~~Confirm spoilt meal allowance~~ ✅ DONE — $10.90 confirmed (sourced from small)
+> 3. Confirm Delayed meal against EA — if it differs from $10.90, introduce a new canonical rate (do NOT reintroduce `delayedMealAllowance`)
+> 4. Confirm standby night meal against EA — if it differs from $10.90, introduce a new canonical rate
+> 5. Confirm `RETAIN_MEAL_THRESHOLDS` (Day Large > 19:00 / +Small > 22:00; Night Large > 09:00 / +Small > 13:00) against EA
+> 6. Complete at least one real-world payslip comparison for each claim type
+> 7. Optionally: confirm the retain-amount formula so it can be auto-calculated
 
 ---
 
-*Last updated: 2026-05 (v1.1) — rates corrected from FRV historical allowance records (2023FY, 2025FY, Current): large meal $20.55 confirmed, double meal $31.45 added, spoilt meal $10.90 confirmed, delayed meal flagged UNRESOLVED. 43/43 validation scenarios passing. — Danny Tinitali, Fire Allowance Tracker*
+*Last updated: 2026-05 (v1.2) — canonical-rate refactor: editable rates collapsed to `kilometreRate`, `smallMealAllowance`, `largeMealAllowance`; double meal derived; spoilt, delayed, standby-night meals sourced from `smallMealAllowance`; overnight cash captured per-claim. Validation suite updated and passing. — Danny Tinitali, Fire Allowance Tracker*

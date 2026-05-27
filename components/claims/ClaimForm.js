@@ -19,7 +19,11 @@ import StationDistanceField from '@/components/distance/StationDistanceField'
 import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField'
 import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
 import ShiftPicker from '@/components/claims/ShiftPicker'
-import { parseAndResolve, composeStationLabel } from '@/lib/distance/stationParser'
+import StationPicker from '@/components/claims/StationPicker'
+import {
+  composeStationLabel,
+  getExplicitlyResolvedStation,
+} from '@/lib/distance/stationParser'
 import {
   calcRecallClaim,
   calcRetainClaim,
@@ -183,78 +187,41 @@ function AdjustedAmountField({ calculatedAmount, adjustedAmount, onChange }) {
   )
 }
 
-// ─── Resolved-station chip (mirrors profile selector badge) ──────────────────
-// Shown beneath each recall-form station input when parseAndResolve maps the
-// typed text onto a canonical fat.stations row. Gives the same visual
-// confirmation the Profile page's stationBadge gives, so the user knows the
-// downstream auto-distance flow will succeed.
-
-function ResolvedStationChip({ station }) {
-  if (!station) return null
-  return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center', gap: '6px',
-      marginTop: '6px', padding: '4px 10px',
-      background: 'rgba(34,197,94,0.08)',
-      border: '1px solid rgba(34,197,94,0.3)',
-      borderRadius: '6px',
-      fontSize: '0.78rem', fontWeight: 600, color: '#4ade80',
-      letterSpacing: '0.02em',
-    }}>
-      <span aria-hidden="true">✓</span>
-      <span>{station.label || `FS${station.id}${station.name ? ' - ' + station.name : ''}`}</span>
-    </div>
-  )
-}
-
-function UnresolvedStationHint() {
-  return (
-    <div style={{
-      marginTop: '6px', padding: '4px 10px',
-      background: 'rgba(251,191,36,0.06)',
-      border: '1px solid rgba(251,191,36,0.25)',
-      borderRadius: '6px',
-      fontSize: '0.74rem', color: '#fbbf24',
-    }}>
-      Type a station number or name (e.g. &ldquo;FS44&rdquo; or &ldquo;Sunshine&rdquo;) to auto-resolve.
-    </div>
-  )
-}
-
 // ─── Sub-form: Recall ─────────────────────────────────────────────────────────
 
 function RecallInputs({ values, onChange, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta }) {
   const rosterLabel = profile?.stationLabel || ''
 
-  // Resolve both free-text station inputs against fat.stations once per render.
-  // The rostered station defaults to the profile station but can be edited; the
-  // recall station is always typed. Both feed:
-  //   - the resolved-station chips (visual confirmation that the typed text
-  //     mapped to a canonical FRV station, mirroring the Profile selector)
-  //   - the route-summary line (so it reflects what the user typed)
-  //   - StationDistanceField (home → rostered leg, keyed off rosterStation.id)
-  //   - RecallLegDistanceField (rostered → recall leg)
+  // Station resolution is gated on EXPLICIT selection only — typing a fuzzy
+  // fragment like "43" must not be treated as a confirmed pick. The
+  // route summary and downstream Google KM / FRV-matrix lookups all read
+  // from these gated values. Both fields use StationPicker; selection
+  // writes the canonical "FS{id} - {name}" label back into the form, and
+  // getExplicitlyResolvedStation only succeeds when the value matches that
+  // canonical label exactly.
   //
-  // Fallback for rosterStation: if `parseAndResolve` returns null because the
-  // stations list hasn't loaded yet OR the typed text is unparseable, fall back
-  // to the profile's persisted station so the home-leg estimate isn't blocked.
-  const rosterStation = (() => {
-    const parsed = parseAndResolve(values.rosteredStn, stations)
-    if (parsed) return parsed
-    if (profile?.stationId) {
-      return {
+  // Special case for the rostered station: the home-leg lookup
+  // (StationDistanceField) gracefully falls back to the profile's persisted
+  // station so the estimate isn't blocked while the user is mid-edit.
+  const explicitRosterStation = getExplicitlyResolvedStation(values.rosteredStn, stations)
+  const recallStation         = getExplicitlyResolvedStation(values.recallStn, stations)
+
+  const profileFallbackStation = profile?.stationId
+    ? {
         id:           profile.stationId,
         name:         profile.stationName || null,
         abbreviation: `FS${profile.stationId}`,
         label:        profile.stationLabel || `FS${profile.stationId}`,
       }
-    }
-    return null
-  })()
+    : null
 
-  const recallStation = parseAndResolve(values.recallStn, stations)
+  // Lookup-side station: explicit selection wins; otherwise fall back to the
+  // profile so the home-leg estimate still runs. This is intentionally
+  // distinct from the chip — we never want a chip implying selection that
+  // the user didn't make.
+  const rosterStationForLookup = explicitRosterStation || profileFallbackStation
 
-  const rosterRouteLabel = rosterStation?.label || rosterLabel || 'Rostered Stn'
+  const rosterRouteLabel = rosterStationForLookup?.label || rosterLabel || 'Rostered Stn'
   const recallRouteLabel = recallStation?.label || 'Recall Stn'
 
   return (
@@ -269,33 +236,34 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
       </div>
 
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Rostered Station</label>
-        <input type="text" value={values.rosteredStn}
-          onChange={(e) => onChange('rosteredStn', e.target.value)}
-          placeholder={rosterLabel || 'e.g. FS45 - Brooklyn'}
-          style={INPUT_STYLE} />
-        {rosterStation && (
-          <ResolvedStationChip station={rosterStation} />
-        )}
+        <label style={LABEL_STYLE} htmlFor="recall-rostered-station-input">Rostered Station</label>
+        <StationPicker
+          id="recall-rostered-station-input"
+          value={values.rosteredStn || ''}
+          onChange={(text) => onChange('rosteredStn', text)}
+          stations={stations}
+          placeholder={rosterLabel || 'Search by FS number or name (e.g. 45 or Brooklyn)'}
+          ariaLabel="Rostered station"
+          profileLabel={profile?.stationLabel || ''}
+        />
         <p style={HELP_STYLE}>Auto-filled from your profile. Edit if different for this recall.</p>
       </div>
 
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Recall Station</label>
-        <input type="text" value={values.recallStn}
-          onChange={(e) => onChange('recallStn', e.target.value)}
-          placeholder="e.g. FS44 - Sunshine" style={INPUT_STYLE} />
-        {recallStation
-          ? <ResolvedStationChip station={recallStation} />
-          : (values.recallStn || '').trim()
-            ? <UnresolvedStationHint />
-            : null
-        }
+        <label style={LABEL_STYLE} htmlFor="recall-recall-station-input">Recall Station</label>
+        <StationPicker
+          id="recall-recall-station-input"
+          value={values.recallStn || ''}
+          onChange={(text) => onChange('recallStn', text)}
+          stations={stations}
+          placeholder="Search by FS number or name (e.g. 44 or Sunshine)"
+          ariaLabel="Recall station"
+        />
       </div>
 
       <StationDistanceField
         userId={userId}
-        station={rosterStation}
+        station={rosterStationForLookup}
         homeAddress={profile?.homeAddress || ''}
         profileLoading={profileLoading}
         value={values.distHomeKm}
@@ -305,7 +273,7 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
 
       <RecallLegDistanceField
         userId={userId}
-        originStation={rosterStation}
+        originStation={rosterStationForLookup}
         destStation={recallStation}
         value={values.distStnKm}
         onChange={(km) => onChange('distStnKm', km)}
@@ -424,23 +392,27 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
     }
     return null
   })()
-  const standbyStation = parseAndResolve(values.standbyStn, stations)
+  // Only treat the standby station as resolved once the user has explicitly
+  // picked an option from the picker (value === canonical label). The
+  // picker never writes raw keystrokes to `value`, so a fuzzy fragment
+  // like "23" can never prematurely trigger the downstream auto-distance
+  // flow.
+  const standbyStation = getExplicitlyResolvedStation(values.standbyStn, stations)
 
   const isMD = values.standbyType === 'M&D'
 
   return (
     <>
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>{isMD ? 'M&D Station' : 'Standby Station'}</label>
-        <input type="text" value={values.standbyStn || ''}
-          onChange={(e) => onChange('standbyStn', e.target.value)}
-          placeholder="e.g. FS44 - Sunshine" style={INPUT_STYLE} />
-        {standbyStation
-          ? <ResolvedStationChip station={standbyStation} />
-          : (values.standbyStn || '').trim()
-            ? <UnresolvedStationHint />
-            : null
-        }
+        <label style={LABEL_STYLE} htmlFor="standby-station-input">{isMD ? 'M&D Station' : 'Standby Station'}</label>
+        <StationPicker
+          id="standby-station-input"
+          value={values.standbyStn || ''}
+          onChange={(text) => onChange('standbyStn', text)}
+          stations={stations}
+          placeholder="Search by FS number or name (e.g. 43 or Deer Park)"
+          ariaLabel={isMD ? 'M&D station' : 'Standby station'}
+        />
         <p style={HELP_STYLE}>Used for Google KM + FRV matrix hours lookup. Leave blank to enter km manually.</p>
       </div>
 

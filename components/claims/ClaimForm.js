@@ -20,6 +20,7 @@ import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField
 import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
 import ShiftPicker from '@/components/claims/ShiftPicker'
 import StationPicker from '@/components/claims/StationPicker'
+import TimeInput24 from '@/components/claims/TimeInput24'
 import {
   composeStationLabel,
   getExplicitlyResolvedStation,
@@ -332,10 +333,10 @@ function RetainInputs({ values, onChange, mealEligibility }) {
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Booked Off Time (24hr)</label>
-        <input type="time" value={(values.bookedOffTime || '').slice(0, 5)}
-          onChange={(e) => onChange('bookedOffTime', (e.target.value || '').slice(0, 5))}
-          step="60"
-          style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
+        <TimeInput24
+          value={values.bookedOffTime}
+          onChange={(v) => onChange('bookedOffTime', v)}
+        />
         {mealEligibility?.thresholds && (
           <p style={HELP_STYLE}>
             {values.shift} thresholds: Large meal after {mealEligibility.thresholds.large},
@@ -434,27 +435,18 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
       </div>
 
       {/* Arrival time is required for both Day and Night standby (Standby
-          type only). Stored as canonical "HHMM" 4-digit string — manual
-          numeric entry, no browser time picker. Day never qualifies for a
-          meal; the time is captured for audit. */}
+          type only). Captured as HH:MM in the UI and normalised to canonical
+          "HHMM" 4-digit string at write time by normaliseStandbyArrivedTime.
+          Day never qualifies for a meal; the time is captured for audit. */}
       {!isMD && (
         <div style={FIELD}>
           <label style={LABEL_STYLE}>Time Arrived (24hr)</label>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]{3,4}"
-            maxLength={4}
-            value={values.arrivedTime || ''}
-            onChange={(e) => {
-              const digits = (e.target.value || '').replace(/\D/g, '').slice(0, 4)
-              onChange('arrivedTime', digits)
-            }}
-            placeholder="e.g. 1930"
+          <TimeInput24
+            value={values.arrivedTime}
+            onChange={(v) => onChange('arrivedTime', v)}
             required
-            style={INPUT_STYLE}
           />
-          <p style={HELP_STYLE}>Four-digit 24hr time (e.g. 0830, 1930).</p>
+          <p style={HELP_STYLE}>24hr time, e.g. 08:30 or 19:30.</p>
         </div>
       )}
 
@@ -540,9 +532,10 @@ function SpoiltInputs({ values, onChange, claimType }) {
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Incident Time (optional)</label>
-        <input type="time" value={values.incidentTime}
-          onChange={(e) => onChange('incidentTime', e.target.value)}
-          style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
+        <TimeInput24
+          value={values.incidentTime}
+          onChange={(v) => onChange('incidentTime', v)}
+        />
         {incidentStatus && incidentStatus !== 'unknown' && (
           <div style={{
             marginTop: '6px', padding: '6px 12px', borderRadius: '6px',
@@ -555,16 +548,18 @@ function SpoiltInputs({ values, onChange, claimType }) {
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Meal Interrupted At (optional)</label>
-        <input type="time" value={values.mealInterrupted}
-          onChange={(e) => onChange('mealInterrupted', e.target.value)}
-          style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
+        <TimeInput24
+          value={values.mealInterrupted}
+          onChange={(v) => onChange('mealInterrupted', v)}
+        />
       </div>
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Return to Station (optional)</label>
-        <input type="time" value={values.returnToStn}
-          onChange={(e) => onChange('returnToStn', e.target.value)}
-          style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
+        <TimeInput24
+          value={values.returnToStn}
+          onChange={(v) => onChange('returnToStn', v)}
+        />
         <p style={HELP_STYLE}>These times are for your records only. They do not affect the claim amount.</p>
       </div>
     </>
@@ -787,6 +782,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     setError(null)
     if (!date) { setError('Please select a date.'); return }
     if (claimType === 'standby' && fields.standbyType === 'Standby') {
+      // Accept HH:MM (current UI) and HHMM (legacy / direct entry).
       const at = (fields.arrivedTime || '').replace(/\D/g, '')
       if (!at) {
         setError('Time Arrived is required for Standby claims (both Day and Night shifts).'); return
@@ -795,7 +791,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       const h = parseInt(padded.slice(0, 2), 10)
       const m = parseInt(padded.slice(2, 4), 10)
       if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) {
-        setError('Time Arrived must be a valid 24hr time (e.g. 0830, 1930).'); return
+        setError('Time Arrived must be a valid 24hr time (e.g. 08:30, 19:30).'); return
       }
     }
     if (!breakdown || breakdown.totalAmount <= 0) {

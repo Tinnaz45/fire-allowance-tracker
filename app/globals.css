@@ -37,8 +37,7 @@ body {
 
 /* Input / select dark mode */
 
-input[type="date"],
-input[type="time"] {
+input[type="date"] {
   color-scheme: dark;
 }
 

@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import { useRates } from '@/lib/calculations/RatesContext'
 import { DEFAULT_RATES, RATE_FIELDS } from '@/lib/calculations/defaultRates'
+import { calcDoubleMealAllowance } from '@/lib/calculations/engine'
 import AppShell from '@/components/nav/AppShell'
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
@@ -236,42 +237,78 @@ export default function SettingsPage() {
               {ratesLoading ? (
                 <p style={{ color: '#9ca3af', fontSize: '0.9rem' }}>Loading your rates…</p>
               ) : (
-                RATE_FIELDS.map((field) => (
-                  <div key={field.key} style={{ marginBottom: '20px' }}>
+                <>
+                  {RATE_FIELDS.map((field) => (
+                    <div key={field.key} style={{ marginBottom: '20px' }}>
+                      <label style={LABEL_STYLE}>
+                        {field.label}
+                        <span style={{ marginLeft: '8px', color: '#6b7280', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                          ({field.unit})
+                        </span>
+                      </label>
+                      <div style={{ position: 'relative' }}>
+                        <span style={{
+                          position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)',
+                          color: '#6b7280', fontSize: '0.9rem', pointerEvents: 'none',
+                          display: field.unit === '$' || field.unit === '$/km' ? 'block' : 'none',
+                        }}>$</span>
+                        <input
+                          type="number"
+                          min={field.min}
+                          max={field.max}
+                          step={field.step}
+                          value={formValues[field.key] ?? ''}
+                          onChange={(e) => handleChange(field.key, e.target.value)}
+                          style={{
+                            ...INPUT_STYLE,
+                            paddingLeft: (field.unit === '$' || field.unit === '$/km') ? '26px' : '12px',
+                          }}
+                        />
+                      </div>
+                      <p style={HELP_STYLE}>{field.help}</p>
+                      <p style={{ ...HELP_STYLE, marginTop: '2px' }}>
+                        System default: ${DEFAULT_RATES[field.key]}
+                        {Number(formValues[field.key]) !== DEFAULT_RATES[field.key] && formValues[field.key] !== '' && (
+                          <span style={{ marginLeft: '8px', color: '#f59e0b' }}>✎ modified</span>
+                        )}
+                      </p>
+                    </div>
+                  ))}
+
+                  {/* Derived: Double Meal Allowance (read-only, = small + large) */}
+                  <div style={{ marginBottom: '4px' }}>
                     <label style={LABEL_STYLE}>
-                      {field.label}
+                      Double Meal Allowance
                       <span style={{ marginLeft: '8px', color: '#6b7280', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-                        ({field.unit})
+                        ($ — derived)
                       </span>
                     </label>
                     <div style={{ position: 'relative' }}>
                       <span style={{
                         position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)',
                         color: '#6b7280', fontSize: '0.9rem', pointerEvents: 'none',
-                        display: field.unit === '$' || field.unit === '$/km' ? 'block' : 'none',
                       }}>$</span>
                       <input
-                        type="number"
-                        min={field.min}
-                        max={field.max}
-                        step={field.step}
-                        value={formValues[field.key] ?? ''}
-                        onChange={(e) => handleChange(field.key, e.target.value)}
+                        type="text"
+                        readOnly
+                        value={calcDoubleMealAllowance({
+                          smallMealAllowance: Number(formValues.smallMealAllowance) || 0,
+                          largeMealAllowance: Number(formValues.largeMealAllowance) || 0,
+                        }).toFixed(2)}
                         style={{
                           ...INPUT_STYLE,
-                          paddingLeft: (field.unit === '$' || field.unit === '$/km') ? '26px' : '12px',
+                          paddingLeft: '26px',
+                          background: '#0a0a0a',
+                          color: '#9ca3af',
+                          cursor: 'not-allowed',
                         }}
                       />
                     </div>
-                    <p style={HELP_STYLE}>{field.help}</p>
-                    <p style={{ ...HELP_STYLE, marginTop: '2px' }}>
-                      System default: ${DEFAULT_RATES[field.key]}
-                      {Number(formValues[field.key]) !== DEFAULT_RATES[field.key] && formValues[field.key] !== '' && (
-                        <span style={{ marginLeft: '8px', color: '#f59e0b' }}>✎ modified</span>
-                      )}
+                    <p style={HELP_STYLE}>
+                      Always = Small Meal + Large Meal. Updates automatically when you change either rate above.
                     </p>
                   </div>
-                ))
+                </>
               )}
             </div>
 

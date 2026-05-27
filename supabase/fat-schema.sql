@@ -349,17 +349,16 @@ create table if not exists fat.spoilt_meals (
 
 -- ─── User allowance rate overrides ────────────────────────────────────────────
 
+-- Only canonical editable rates are persisted. Derived allowances
+-- (double meal = small + large; spoilt/delayed/standby night meal =
+-- small_meal_allowance) compute at read time — no override column needed.
+-- Overnight cash is captured per-claim on the retain row, not as a rate.
 create table if not exists fat.user_rates (
   id                            uuid primary key default gen_random_uuid(),
   user_id                       uuid not null unique references auth.users(id) on delete cascade,
   kilometre_rate                numeric(8,4),
   small_meal_allowance          numeric(8,2),
   large_meal_allowance          numeric(8,2),
-  spoilt_meal_allowance         numeric(8,2),
-  delayed_meal_allowance        numeric(8,2),
-  double_meal_allowance         numeric(8,2),
-  overnight_allowance           numeric(8,2),
-  standby_night_meal_allowance  numeric(8,2),
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
 );

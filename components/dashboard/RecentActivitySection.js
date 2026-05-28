@@ -237,7 +237,17 @@ function ClaimDetails({ claimType, claim }) {
   }
 
   if (claimType === 'retain') {
-    if (claim.retain_amount != null && Number(claim.retain_amount) > 0) {
+    const hours = Number(claim.generated_hours)
+    if (Number.isFinite(hours) && hours > 0) {
+      const amount = Number(claim.retain_amount) || 0
+      lines.push({
+        label: 'Retain',
+        value: amount > 0
+          ? `${hours.toFixed(2)} h ($${amount.toFixed(2)})`
+          : `${hours.toFixed(2)} h`,
+      })
+    } else if (claim.retain_amount != null && Number(claim.retain_amount) > 0) {
+      // Historical rows pre-dating the hours-first migration: no generated_hours.
       lines.push({ label: 'Retain', value: `$${Number(claim.retain_amount).toFixed(2)}` })
     }
     if (claim.overnight_cash != null && Number(claim.overnight_cash) > 0) {

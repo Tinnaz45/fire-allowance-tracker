@@ -262,6 +262,13 @@ create table if not exists fat.retain (
   rmss_number        text,
   is_firecall        boolean default false,
   overnight_cash     numeric(8,2) default 0,
+  -- Hours-first retain (FRV rule). generated_hours is derived from shift +
+  -- booked_off_time by calcRetainHours(); retain_amount (the legacy dollar
+  -- column) is now derived = generated_hours × retain_hourly_rate snapshot.
+  -- retain_rate_used captures the hourly rate that was applied at create time
+  -- so historical claims reproduce exactly even if the rate changes later.
+  generated_hours    numeric(6,2),
+  retain_rate_used   numeric(8,2),
   retain_amount      numeric(8,2),
   total_amount       numeric(8,2),
   adjusted_amount    numeric(8,2),
@@ -279,6 +286,10 @@ create table if not exists fat.retain (
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now()
 );
+
+-- Backfill new retain columns on existing deployments (idempotent).
+alter table fat.retain add column if not exists generated_hours  numeric(6,2);
+alter table fat.retain add column if not exists retain_rate_used numeric(8,2);
 
 create table if not exists fat.standby (
   id                 uuid primary key default gen_random_uuid(),
@@ -359,9 +370,16 @@ create table if not exists fat.user_rates (
   kilometre_rate                numeric(8,4),
   small_meal_allowance          numeric(8,2),
   large_meal_allowance          numeric(8,2),
+  -- Retain hourly rate: applied to auto-generated retain hours (calcRetainHours()).
+  -- generated_amount = generated_hours × retain_hourly_rate. Defaults to NULL so
+  -- DEFAULT_RATES.retainHourlyRate (0.00) applies until the user sets a rate.
+  retain_hourly_rate            numeric(8,2),
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
 );
+
+-- Backfill: add the new column to existing deployments (idempotent).
+alter table fat.user_rates add column if not exists retain_hourly_rate numeric(8,2);
 
 
 -- ─── updated_at triggers ──────────────────────────────────────────────────────

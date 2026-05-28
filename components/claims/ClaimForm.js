@@ -121,7 +121,18 @@ function CalcPreview({ breakdown, rates, onShowCalc }) {
   if (breakdown.mealieAmount > 0)  lines.push('Meal allowance: $' + breakdown.mealieAmount.toFixed(2))
   if (breakdown.nightMealie > 0)   lines.push('Night meal: $' + breakdown.nightMealie.toFixed(2))
   if (breakdown.mealAmount > 0)    lines.push((breakdown.mealLabel ? breakdown.mealLabel + ': ' : 'Meal allowance: ') + '$' + breakdown.mealAmount.toFixed(2))
-  if (breakdown.retainAmount > 0)  lines.push('Retain: $' + breakdown.retainAmount.toFixed(2))
+  if (breakdown.generatedHours > 0) {
+    const hrs    = breakdown.generatedHours.toFixed(2)
+    const rate   = (breakdown.retainHourlyRate ?? 0).toFixed(2)
+    const amount = breakdown.retainAmount.toFixed(2)
+    if (breakdown.retainHourlyRate > 0) {
+      lines.push(`Retain: ${hrs} h × $${rate}/h = $${amount}`)
+    } else {
+      lines.push(`Retain: ${hrs} h (set retain hourly rate in Settings to derive $)`)
+    }
+  } else if (breakdown.retainAmount > 0) {
+    lines.push('Retain: $' + breakdown.retainAmount.toFixed(2))
+  }
   if (breakdown.overnightCash > 0) lines.push('Overnight: $' + breakdown.overnightCash.toFixed(2))
 
   return (
@@ -322,11 +333,21 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
 
 // ─── Sub-form: Retain ─────────────────────────────────────────────────────────
 
-function RetainInputs({ values, onChange, mealEligibility }) {
+function RetainInputs({ values, onChange, mealEligibility, retainBreakdown, retainHourlyRate }) {
   const eligTier = mealEligibility?.tier || 'none'
   const eligColor = eligTier === 'none' ? '#9ca3af' : '#4ade80'
   const eligBg    = eligTier === 'none' ? 'rgba(107,114,128,0.08)' : 'rgba(34,197,94,0.08)'
   const eligBorder= eligTier === 'none' ? 'rgba(107,114,128,0.3)' : 'rgba(34,197,94,0.3)'
+
+  const hours       = retainBreakdown?.generatedHours ?? 0
+  const dollarValue = retainBreakdown?.retainAmount   ?? 0
+  const rulePath    = retainBreakdown?.retainRulePath
+  const explanation = retainBreakdown?.retainExplanation
+  const hasHours    = hours > 0
+  const rateMissing = retainHourlyRate <= 0
+  const panelColor  = hasHours ? '#f9fafb' : '#9ca3af'
+  const panelBg     = hasHours ? 'rgba(220,38,38,0.08)' : 'rgba(107,114,128,0.06)'
+  const panelBorder = hasHours ? 'rgba(220,38,38,0.30)' : 'rgba(107,114,128,0.30)'
 
   return (
     <>
@@ -338,7 +359,13 @@ function RetainInputs({ values, onChange, mealEligibility }) {
           <option value="Day">Day Shift</option>
           <option value="Night">Night Shift</option>
         </select>
-        <p style={HELP_STYLE}>Which shift was the retain attached to?</p>
+        <p style={HELP_STYLE}>
+          Drives the FRV retain rule:
+          {' '}{values.shift === 'Night' ? 'Night' : 'Day'}-shift rostered finish
+          {' '}{values.shift === 'Night' ? '08:00' : '18:00'} · minimum trigger
+          {' '}{values.shift === 'Night' ? '09:00' : '19:00'} · flat-end
+          {' '}{values.shift === 'Night' ? '12:00' : '22:00'}.
+        </p>
       </div>
 
       <div style={FIELD}>
@@ -347,6 +374,43 @@ function RetainInputs({ values, onChange, mealEligibility }) {
           value={values.bookedOffTime}
           onChange={(v) => onChange('bookedOffTime', v)}
         />
+        <p style={HELP_STYLE}>
+          The clock time you were booked off. Retain hours are auto-calculated
+          from rostered finish in 0.25h increments, with a mandatory 4.00h
+          minimum after the trigger time.
+        </p>
+      </div>
+
+      {/* Hours-first calculated entitlement panel. Hours are the primary
+          value; dollars are derived from the retain hourly rate snapshot. */}
+      <div style={{
+        ...FIELD,
+        padding: '12px 14px', borderRadius: '8px',
+        background: panelBg, border: '1px solid ' + panelBorder,
+      }}>
+        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
+          Retain (auto-calculated)
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: panelColor }}>
+            {hours.toFixed(2)} h
+          </div>
+          <div style={{ fontSize: '0.85rem', color: hasHours ? '#d1d5db' : '#6b7280' }}>
+            {rateMissing
+              ? '$ derived from hourly rate (set rate in Settings → Rates)'
+              : `= $${dollarValue.toFixed(2)} at $${retainHourlyRate.toFixed(2)}/h`}
+          </div>
+        </div>
+        {explanation && (
+          <p style={{ marginTop: '8px', fontSize: '0.78rem', color: '#9ca3af', lineHeight: 1.5 }}>
+            <strong style={{ color: '#d1d5db' }}>Rule applied:</strong> {explanation}
+            {rulePath ? ` (${rulePath})` : ''}
+          </p>
+        )}
+      </div>
+
+      <div style={FIELD}>
+        <label style={LABEL_STYLE}>Meal Eligibility</label>
         {mealEligibility?.thresholds && (
           <p style={HELP_STYLE}>
             {values.shift} thresholds: Large meal after {mealEligibility.thresholds.large},
@@ -363,19 +427,12 @@ function RetainInputs({ values, onChange, mealEligibility }) {
       </div>
 
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Retain Allowance ($) - Maint stn N/N</label>
-        <input type="number" min="0" step="0.01" placeholder="0.00"
-          value={values.retainAmount}
-          onChange={(e) => onChange('retainAmount', e.target.value)}
-          style={INPUT_STYLE} />
-        <p style={HELP_STYLE}>Payslip line: Maint stn N/N. Check your pay advice for the correct value.</p>
-      </div>
-      <div style={FIELD}>
         <label style={LABEL_STYLE}>Overnight Cash ($)</label>
         <input type="number" min="0" step="0.01" placeholder="0.00"
           value={values.overnightCash}
           onChange={(e) => onChange('overnightCash', e.target.value)}
           style={INPUT_STYLE} />
+        <p style={HELP_STYLE}>Petty cash imprest received overnight, if any. Not part of the retain entitlement itself.</p>
       </div>
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Pay Number</label>
@@ -563,7 +620,7 @@ function SpoiltInputs({ values, onChange, claimType }) {
 
 const DEFAULTS = {
   recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', arrivalTime: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
-  retain:       { retainAmount: '', overnightCash: '', payslipPayNbr: '', shift: 'Day', bookedOffTime: '' },
+  retain:       { overnightCash: '', payslipPayNbr: '', shift: 'Day', bookedOffTime: '' },
   standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
   md:           { standbyType: 'M&D',     standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
   spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '' },
@@ -710,10 +767,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         }, rates)
       } else if (claimType === 'retain') {
         result = calcRetainClaim({
-          retainAmount:  num(fields.retainAmount),
-          overnightCash: num(fields.overnightCash),
           shift:         fields.shift,
           bookedOffTime: fields.bookedOffTime,
+          overnightCash: num(fields.overnightCash),
         }, rates)
       } else if (claimType === 'standby' || claimType === 'md') {
         const hasNightMeal = isStandbyNightMealEligible({
@@ -759,10 +815,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       }, rates)
     } else if (claimType === 'retain') {
       lines = buildRetainCalcLines({
-        retainAmount:  num(fields.retainAmount),
-        overnightCash: num(fields.overnightCash),
         shift:         fields.shift,
         bookedOffTime: fields.bookedOffTime,
+        overnightCash: num(fields.overnightCash),
       }, rates)
     }
     setShowCalcLines(lines)
@@ -797,7 +852,14 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         setError('Arrival Time must be a valid 24hr time (e.g. 08:30, 19:30).'); return
       }
     }
-    if (!breakdown || breakdown.totalAmount <= 0) {
+    // Retain is hours-first: a claim with generated_hours > 0 is valid even if
+    // the dollar amount is $0 because the retainHourlyRate hasn't been set yet.
+    // For all other claim types the historical $0 guard still applies.
+    if (claimType === 'retain') {
+      if (!breakdown || !(breakdown.generatedHours > 0)) {
+        setError('Enter shift + booked off time so retain hours can be calculated.'); return
+      }
+    } else if (!breakdown || breakdown.totalAmount <= 0) {
       setError('Calculated amount must be greater than $0.00.'); return
     }
 
@@ -826,7 +888,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       )
     } else if (claimType === 'retain') {
       calcLines = buildRetainCalcLines(
-        { retainAmount: num(fields.retainAmount), overnightCash: num(fields.overnightCash), shift: fields.shift, bookedOffTime: fields.bookedOffTime },
+        { shift: fields.shift, bookedOffTime: fields.bookedOffTime, overnightCash: num(fields.overnightCash) },
         rates
       )
     }
@@ -904,6 +966,8 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           values={fields}
           onChange={handleFieldChange}
           mealEligibility={calcRetainMealEligibility({ shift: fields.shift, bookedOffTime: fields.bookedOffTime })}
+          retainBreakdown={breakdown}
+          retainHourlyRate={Number(rates?.retainHourlyRate) || 0}
         />
       )}
       {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}

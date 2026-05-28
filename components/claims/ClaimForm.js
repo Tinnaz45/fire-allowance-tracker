@@ -27,6 +27,7 @@ import {
 } from '@/lib/distance/stationParser'
 import {
   calcRecallClaim,
+  calculateRecallMealEntitlements,
   calcRetainClaim,
   calcRetainMealEligibility,
   calcStandbyClaim,
@@ -42,6 +43,7 @@ import {
   roundMoney,
 } from '@/lib/calculations/engine'
 import { fat } from '@/lib/supabaseClient'
+import InfoPopover from '@/components/claims/InfoPopover'
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -201,20 +203,12 @@ function AdjustedAmountField({ calculatedAmount, adjustedAmount, onChange }) {
 
 // ─── Sub-form: Recall ─────────────────────────────────────────────────────────
 
-function RecallInputs({ values, onChange, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta }) {
+function RecallInputs({ values, onChange, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta, entitlement }) {
   const rosterLabel = profile?.stationLabel || ''
 
   // Station resolution is gated on EXPLICIT selection only — typing a fuzzy
-  // fragment like "43" must not be treated as a confirmed pick. The
-  // route summary and downstream Google KM / FRV-matrix lookups all read
-  // from these gated values. Both fields use StationPicker; selection
-  // writes the canonical "FS{id} - {name}" label back into the form, and
-  // getExplicitlyResolvedStation only succeeds when the value matches that
-  // canonical label exactly.
-  //
-  // Special case for the rostered station: the home-leg lookup
-  // (StationDistanceField) gracefully falls back to the profile's persisted
-  // station so the estimate isn't blocked while the user is mid-edit.
+  // fragment like "43" must not be treated as a confirmed pick. Downstream
+  // Google KM / FRV-matrix lookups all read from these gated values.
   const explicitRosterStation = getExplicitlyResolvedStation(values.rosteredStn, stations)
   const recallStation         = getExplicitlyResolvedStation(values.recallStn, stations)
 
@@ -228,25 +222,14 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
     : null
 
   // Lookup-side station: explicit selection wins; otherwise fall back to the
-  // profile so the home-leg estimate still runs. This is intentionally
-  // distinct from the chip — we never want a chip implying selection that
-  // the user didn't make.
+  // profile so the home-leg estimate still runs.
   const rosterStationForLookup = explicitRosterStation || profileFallbackStation
 
-  const rosterRouteLabel = rosterStationForLookup?.label || rosterLabel || 'Rostered Stn'
-  const recallRouteLabel = recallStation?.label || 'Recall Stn'
+  const notified = !!values.notified
+  const shiftSelected = values.shift === 'Day' || values.shift === 'Night'
 
   return (
     <>
-      <div style={{
-        background: '#111', border: '1px solid #2a2a2a',
-        borderRadius: '8px', padding: '10px 14px', marginBottom: '16px',
-        fontSize: '0.8rem', color: '#9ca3af', lineHeight: 1.8,
-      }}>
-        <div style={{ fontWeight: 700, color: '#e5e7eb', marginBottom: '4px' }}>Recall Route</div>
-        <div>Home - {rosterRouteLabel} - {recallRouteLabel} - {rosterRouteLabel} - Home</div>
-      </div>
-
       <div style={FIELD}>
         <label style={LABEL_STYLE} htmlFor="recall-rostered-station-input">Rostered Station</label>
         <StationPicker
@@ -292,11 +275,33 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
         onRoutingMeta={onStnLegMeta}
       />
 
+      {/* Shift Type — required, no default. Drives meal entitlement and the
+          standard shift-end boundary used to size the recall duration. */}
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Incident Number</label>
-        <input type="text" value={values.incidentNumber}
-          onChange={(e) => onChange('incidentNumber', e.target.value)}
-          placeholder="e.g. INC-2026-00123" style={INPUT_STYLE} />
+        <label style={LABEL_STYLE}>Shift Type</label>
+        <select
+          value={values.shift || ''}
+          onChange={(e) => onChange('shift', e.target.value)}
+          style={{ ...INPUT_STYLE, cursor: 'pointer' }}
+        >
+          <option value="" disabled>Select shift type...</option>
+          <option value="Day">Day Shift</option>
+          <option value="Night">Night Shift</option>
+        </select>
+        <p style={HELP_STYLE}>Required. Drives meal entitlement and standard-shift boundary.</p>
+
+        <label style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          marginTop: 10, fontSize: '0.85rem', color: '#d1d5db', cursor: 'pointer',
+        }}>
+          <input
+            type="checkbox"
+            checked={notified}
+            onChange={(e) => onChange('notified', e.target.checked)}
+            style={{ accentColor: '#dc2626', width: 16, height: 16 }}
+          />
+          Notified Recall
+        </label>
       </div>
 
       <div style={FIELD}>
@@ -309,23 +314,72 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
         <p style={HELP_STYLE}>24hr time you arrived at the recall station, e.g. 08:30 or 19:30.</p>
       </div>
 
+      {/* Live, read-only meal entitlement preview. Updates as shift / arrival /
+          notified change. Replaces the old manual meal-allowance select. */}
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Meal Entitlement</label>
-        <select value={values.mealEntitlement}
-          onChange={(e) => onChange('mealEntitlement', e.target.value)}
-          style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
-          <option value="none">No meal allowance</option>
-          <option value="large">Large meal ($20.55)</option>
-          <option value="double">Double meal ($31.45 - 1 small + 1 large for tax)</option>
-        </select>
-        <p style={HELP_STYLE}>Double meal counts as 1 small + 1 large for ATO tax purposes.</p>
-      </div>
-
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Pay Number (Callback-Ops / Excess Travel)</label>
-        <input type="text" value={values.payslipPayNbr}
-          onChange={(e) => onChange('payslipPayNbr', e.target.value)}
-          placeholder="e.g. 20.2026" style={INPUT_STYLE} />
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 6,
+        }}>
+          <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>Meal Allowance</span>
+          <InfoPopover label="Recall meal entitlement EBA rules">
+            <strong style={{ color: '#f9fafb' }}>EBA — Recall Meal Allowance</strong>
+            <div style={{ marginTop: 4 }}>
+              Recall meal entitlements are auto-generated from shift type,
+              arrival time and recall duration (arrival → end of standard
+              shift, or your booked-off time if entered):
+            </div>
+            <ul style={{ paddingLeft: 16, marginTop: 6, marginBottom: 0 }}>
+              <li><strong>Day Shift</strong>, arrival ≤ 09:59 — 1× Large + 1× Small</li>
+              <li><strong>Day Shift</strong>, arrival ≥ 10:00 — 1× Large only</li>
+              <li><strong>Night Shift</strong> — 1× Large only (never doubled)</li>
+              <li><strong>Notified Recall</strong> — no meal allowances</li>
+            </ul>
+            <div style={{ marginTop: 6 }}>
+              A minimum recall duration of 4 hours is required before any
+              meal entitlement is generated.
+            </div>
+          </InfoPopover>
+        </div>
+        {notified ? (
+          <div style={{
+            padding: '10px 12px', borderRadius: '6px',
+            background: 'rgba(107,114,128,0.08)',
+            border: '1px solid rgba(107,114,128,0.3)',
+            color: '#9ca3af', fontSize: '0.82rem',
+          }}>
+            No meal allowances are entitled for Notified Recalls
+          </div>
+        ) : !shiftSelected ? (
+          <div style={{
+            padding: '10px 12px', borderRadius: '6px',
+            background: 'rgba(107,114,128,0.08)',
+            border: '1px solid rgba(107,114,128,0.3)',
+            color: '#9ca3af', fontSize: '0.82rem',
+          }}>
+            Select a shift type to generate meal entitlement.
+          </div>
+        ) : (
+          <div style={{
+            padding: '10px 12px', borderRadius: '6px',
+            background: (entitlement?.largeCount ?? 0) + (entitlement?.smallCount ?? 0) > 0
+              ? 'rgba(34,197,94,0.08)' : 'rgba(107,114,128,0.08)',
+            border: '1px solid ' + (
+              (entitlement?.largeCount ?? 0) + (entitlement?.smallCount ?? 0) > 0
+                ? 'rgba(34,197,94,0.3)' : 'rgba(107,114,128,0.3)'
+            ),
+            color: (entitlement?.largeCount ?? 0) + (entitlement?.smallCount ?? 0) > 0
+              ? '#4ade80' : '#9ca3af',
+            fontSize: '0.82rem', fontWeight: 600,
+          }}>
+            {entitlement?.label || 'Enter arrival time to determine entitlement'}
+            {entitlement?.durationMin != null && (
+              <div style={{ marginTop: 4, fontSize: '0.74rem', fontWeight: 400, color: '#9ca3af' }}>
+                Recall duration: {(entitlement.durationMin / 60).toFixed(2)}h
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </>
   )
@@ -410,11 +464,33 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown, reta
       </div>
 
       <div style={FIELD}>
-        <label style={LABEL_STYLE}>Meal Eligibility</label>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 6,
+        }}>
+          <span style={{ ...LABEL_STYLE, marginBottom: 0 }}>Meal Eligibility</span>
+          <InfoPopover label="Retain meal entitlement EBA rules">
+            <strong style={{ color: '#f9fafb' }}>EBA — Retain Meal Allowance</strong>
+            <div style={{ marginTop: 4 }}>
+              Retain meals stack with booked-off time. Threshold comparisons
+              are inclusive — a displayed threshold time qualifies once the
+              clock reaches it:
+            </div>
+            <ul style={{ paddingLeft: 16, marginTop: 6, marginBottom: 0 }}>
+              <li>1× Large Meal once the initial threshold is reached.</li>
+              <li>+1× Small Meal at each additional 2-hour threshold thereafter.</li>
+            </ul>
+            <div style={{ marginTop: 6 }}>
+              Worked example (Night shift): booked off until 09:59 → 1× Large;
+              10:00 → 1× Large + 1× Small; 12:00 → 1× Large + 2× Small;
+              14:00 → 1× Large + 3× Small.
+            </div>
+          </InfoPopover>
+        </div>
         {mealEligibility?.thresholds && (
           <p style={HELP_STYLE}>
-            {values.shift} thresholds: Large meal after {mealEligibility.thresholds.large},
-            + Small meal after {mealEligibility.thresholds.smallAdditional}.
+            {values.shift} thresholds: Large ≥ {mealEligibility.thresholds.large};
+            + Small from {mealEligibility.thresholds.smallAt}, then +1 every 2h.
           </p>
         )}
         <div style={{
@@ -426,20 +502,6 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown, reta
         </div>
       </div>
 
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Overnight Cash ($)</label>
-        <input type="number" min="0" step="0.01" placeholder="0.00"
-          value={values.overnightCash}
-          onChange={(e) => onChange('overnightCash', e.target.value)}
-          style={INPUT_STYLE} />
-        <p style={HELP_STYLE}>Petty cash imprest received overnight, if any. Not part of the retain entitlement itself.</p>
-      </div>
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Pay Number</label>
-        <input type="text" value={values.payslipPayNbr}
-          onChange={(e) => onChange('payslipPayNbr', e.target.value)}
-          placeholder="e.g. 20.2026" style={INPUT_STYLE} />
-      </div>
     </>
   )
 }
@@ -619,8 +681,8 @@ function SpoiltInputs({ values, onChange, claimType }) {
 // ─── Default values per type ──────────────────────────────────────────────────
 
 const DEFAULTS = {
-  recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', arrivalTime: '', mealEntitlement: 'none', incidentNumber: '', payslipPayNbr: '' },
-  retain:       { overnightCash: '', payslipPayNbr: '', shift: 'Day', bookedOffTime: '' },
+  recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', arrivalTime: '', shift: '', notified: false },
+  retain:       { shift: 'Day', bookedOffTime: '' },
   standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
   md:           { standbyType: 'M&D',     standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
   spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '' },
@@ -761,15 +823,17 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     try {
       if (claimType === 'recalls') {
         result = calcRecallClaim({
-          distHomeKm:      num(fields.distHomeKm),
-          distStnKm:       num(fields.distStnKm),
-          mealEntitlement: fields.mealEntitlement,
+          distHomeKm:    num(fields.distHomeKm),
+          distStnKm:     num(fields.distStnKm),
+          shift:         fields.shift || null,
+          notified:      !!fields.notified,
+          arrivalTime:   fields.arrivalTime,
+          bookedOffTime: fields.bookedOffTime || null,
         }, rates)
       } else if (claimType === 'retain') {
         result = calcRetainClaim({
           shift:         fields.shift,
           bookedOffTime: fields.bookedOffTime,
-          overnightCash: num(fields.overnightCash),
         }, rates)
       } else if (claimType === 'standby' || claimType === 'md') {
         const hasNightMeal = isStandbyNightMealEligible({
@@ -796,7 +860,8 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     if (claimType === 'recalls') {
       lines = buildRecallCalcLines({
         distHomeKm: num(fields.distHomeKm), distStnKm: num(fields.distStnKm),
-        mealEntitlement: fields.mealEntitlement,
+        shift: fields.shift || null, notified: !!fields.notified,
+        arrivalTime: fields.arrivalTime, bookedOffTime: fields.bookedOffTime || null,
       }, rates, { rosterStation: fields.rosteredStn || 'Rostered Stn', recallStation: fields.recallStn || 'Recall Stn' })
     } else if (claimType === 'standby' || claimType === 'md') {
       lines = buildStandbyCalcLines({
@@ -817,7 +882,6 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       lines = buildRetainCalcLines({
         shift:         fields.shift,
         bookedOffTime: fields.bookedOffTime,
-        overnightCash: num(fields.overnightCash),
       }, rates)
     }
     setShowCalcLines(lines)
@@ -828,6 +892,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     setError(null)
     if (!date) { setError('Please select a date.'); return }
     if (claimType === 'recalls') {
+      if (fields.shift !== 'Day' && fields.shift !== 'Night') {
+        setError('Shift Type is required for Recall claims (Day or Night).'); return
+      }
       const at = (fields.arrivalTime || '').replace(/\D/g, '')
       if (!at) {
         setError('Arrival Time is required for Recall claims.'); return
@@ -867,7 +934,11 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     let calcLines = []
     if (claimType === 'recalls') {
       calcLines = buildRecallCalcLines(
-        { distHomeKm: num(fields.distHomeKm), distStnKm: num(fields.distStnKm), mealEntitlement: fields.mealEntitlement },
+        {
+          distHomeKm: num(fields.distHomeKm), distStnKm: num(fields.distStnKm),
+          shift: fields.shift || null, notified: !!fields.notified,
+          arrivalTime: fields.arrivalTime, bookedOffTime: fields.bookedOffTime || null,
+        },
         rates,
         { rosterStation: fields.rosteredStn, recallStation: fields.recallStn }
       )
@@ -888,7 +959,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       )
     } else if (claimType === 'retain') {
       calcLines = buildRetainCalcLines(
-        { shift: fields.shift, bookedOffTime: fields.bookedOffTime, overnightCash: num(fields.overnightCash) },
+        { shift: fields.shift, bookedOffTime: fields.bookedOffTime },
         rates
       )
     }
@@ -935,6 +1006,15 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     ? isStandbyNightMealEligible({ standbyType: fields.standbyType, shift: fields.shift, arrivedTime: fields.arrivedTime })
     : false
 
+  const recallEntitlement = claimType === 'recalls'
+    ? calculateRecallMealEntitlements({
+        shift:         fields.shift || null,
+        notified:      !!fields.notified,
+        arrivalTime:   fields.arrivalTime,
+        bookedOffTime: fields.bookedOffTime || null,
+      })
+    : null
+
   const effectiveAmount = adjustedAmount !== null && adjustedAmount !== ''
     ? roundMoney(Number(adjustedAmount))
     : breakdown?.totalAmount ?? 0
@@ -960,7 +1040,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
       </div>
 
-      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} />}
+      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} entitlement={recallEntitlement} />}
       {claimType === 'retain'       && (
         <RetainInputs
           values={fields}

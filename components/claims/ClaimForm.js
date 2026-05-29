@@ -708,7 +708,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
   const { rates }    = useRates()
 
   // Quick-action prefill: open the form directly on the requested type.
-  const startingType = CLAIM_TYPE_ORDER.includes(initialClaimType) ? initialClaimType : 'recalls'
+  const startingType = CLAIM_TYPE_ORDER.includes(initialClaimType) ? initialClaimType : 'retain'
 
   const [claimType, setClaimType]           = useState(startingType)
   const [date, setDate]                     = useState(getTodayLocal)

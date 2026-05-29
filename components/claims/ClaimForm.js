@@ -304,15 +304,17 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
         </label>
       </div>
 
-      <div style={FIELD}>
-        <label style={LABEL_STYLE}>Arrival Time (24hr)</label>
-        <TimeInput24
-          value={values.arrivalTime}
-          onChange={(v) => onChange('arrivalTime', v)}
-          required
-        />
-        <p style={HELP_STYLE}>24hr time you arrived at the recall station, e.g. 08:30 or 19:30.</p>
-      </div>
+      {!notified && (
+        <div style={FIELD}>
+          <label style={LABEL_STYLE}>Arrival Time (24hr)</label>
+          <TimeInput24
+            value={values.arrivalTime}
+            onChange={(v) => onChange('arrivalTime', v)}
+            required
+          />
+          <p style={HELP_STYLE}>24hr time you arrived at the recall station, e.g. 08:30 or 19:30.</p>
+        </div>
+      )}
 
       {/* Live, read-only meal entitlement preview. Updates as shift / arrival /
           notified change. Replaces the old manual meal-allowance select. */}
@@ -895,15 +897,17 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       if (fields.shift !== 'Day' && fields.shift !== 'Night') {
         setError('Shift Type is required for Recall claims (Day or Night).'); return
       }
-      const at = (fields.arrivalTime || '').replace(/\D/g, '')
-      if (!at) {
-        setError('Arrival Time is required for Recall claims.'); return
-      }
-      const padded = at.padStart(4, '0')
-      const h = parseInt(padded.slice(0, 2), 10)
-      const m = parseInt(padded.slice(2, 4), 10)
-      if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) {
-        setError('Arrival Time must be a valid 24hr time (e.g. 08:30, 19:30).'); return
+      if (!fields.notified) {
+        const at = (fields.arrivalTime || '').replace(/\D/g, '')
+        if (!at) {
+          setError('Arrival Time is required for Recall claims.'); return
+        }
+        const padded = at.padStart(4, '0')
+        const h = parseInt(padded.slice(0, 2), 10)
+        const m = parseInt(padded.slice(2, 4), 10)
+        if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) {
+          setError('Arrival Time must be a valid 24hr time (e.g. 08:30, 19:30).'); return
+        }
       }
     }
     if (claimType === 'standby' && fields.standbyType === 'Standby') {

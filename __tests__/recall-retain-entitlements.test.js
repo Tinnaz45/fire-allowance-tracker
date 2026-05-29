@@ -20,7 +20,6 @@ const RATES = {
   kilometreRate:      0.99,
   smallMealAllowance: 10.90,
   largeMealAllowance: 20.55,
-  retainHourlyRate:   20.00,
 }
 
 // ─── Recall entitlement helper ───────────────────────────────────────────────

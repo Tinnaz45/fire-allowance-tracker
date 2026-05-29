@@ -1,7 +1,7 @@
 // Verify FRV retain-hour rules against all supplied examples + edge cases.
 // Run: node scripts/verify-retain-hours.mjs
 
-import { calcRetainHours, calcRetainClaim } from '../lib/calculations/engine.js'
+import { calcRetainHours } from '../lib/calculations/engine.js'
 
 const cases = [
   // ── Day shift ─────────────────────────────────────────────────────────────
@@ -51,30 +51,6 @@ for (const { shift, bookedOffTime, expected, label } of cases) {
 
 console.log()
 console.log(`Total: ${pass + fail}   Pass: ${pass}   Fail: ${fail}`)
-
-// ── Dollar derivation: with rate set ──────────────────────────────────────
-console.log()
-console.log('── Dollar derivation sanity check ──')
-const breakdown = calcRetainClaim(
-  { shift: 'Day', bookedOffTime: '22:15', overnightCash: 0 },
-  { retainHourlyRate: 32.50, smallMealAllowance: 10.90, largeMealAllowance: 20.55 }
-)
-console.log('Day 22:15 @ $32.50/h:')
-console.log(`  generatedHours      = ${breakdown.generatedHours.toFixed(2)}h`)
-console.log(`  retainAmount        = $${breakdown.retainAmount.toFixed(2)} (expect $138.13 = 4.25 × 32.50)`)
-console.log(`  retainHourlyRate    = $${breakdown.retainHourlyRate.toFixed(2)}`)
-console.log(`  retainRulePath      = ${breakdown.retainRulePath}`)
-console.log(`  retainExplanation   = ${breakdown.retainExplanation}`)
-
-// ── Zero rate: hours still calculated, $0 ────────────────────────────────
-const zeroRate = calcRetainClaim(
-  { shift: 'Day', bookedOffTime: '19:00', overnightCash: 0 },
-  { retainHourlyRate: 0, smallMealAllowance: 10.90, largeMealAllowance: 20.55 }
-)
-console.log()
-console.log('Day 19:00 @ $0/h (rate not yet set):')
-console.log(`  generatedHours = ${zeroRate.generatedHours.toFixed(2)}h (expect 4.00)`)
-console.log(`  retainAmount   = $${zeroRate.retainAmount.toFixed(2)} (expect $0.00)`)
 
 if (fail > 0) {
   console.log()

@@ -124,16 +124,7 @@ function CalcPreview({ breakdown, rates, onShowCalc }) {
   if (breakdown.nightMealie > 0)   lines.push('Night meal: $' + breakdown.nightMealie.toFixed(2))
   if (breakdown.mealAmount > 0)    lines.push((breakdown.mealLabel ? breakdown.mealLabel + ': ' : 'Meal allowance: ') + '$' + breakdown.mealAmount.toFixed(2))
   if (breakdown.generatedHours > 0) {
-    const hrs    = breakdown.generatedHours.toFixed(2)
-    const rate   = (breakdown.retainHourlyRate ?? 0).toFixed(2)
-    const amount = breakdown.retainAmount.toFixed(2)
-    if (breakdown.retainHourlyRate > 0) {
-      lines.push(`Retain: ${hrs} h × $${rate}/h = $${amount}`)
-    } else {
-      lines.push(`Retain: ${hrs} h (set retain hourly rate in Settings to derive $)`)
-    }
-  } else if (breakdown.retainAmount > 0) {
-    lines.push('Retain: $' + breakdown.retainAmount.toFixed(2))
+    lines.push(`Retain: ${breakdown.generatedHours.toFixed(2)} h`)
   }
   if (breakdown.overnightCash > 0) lines.push('Overnight: $' + breakdown.overnightCash.toFixed(2))
 
@@ -389,18 +380,16 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
 
 // ─── Sub-form: Retain ─────────────────────────────────────────────────────────
 
-function RetainInputs({ values, onChange, mealEligibility, retainBreakdown, retainHourlyRate }) {
+function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
   const eligTier = mealEligibility?.tier || 'none'
   const eligColor = eligTier === 'none' ? '#9ca3af' : '#4ade80'
   const eligBg    = eligTier === 'none' ? 'rgba(107,114,128,0.08)' : 'rgba(34,197,94,0.08)'
   const eligBorder= eligTier === 'none' ? 'rgba(107,114,128,0.3)' : 'rgba(34,197,94,0.3)'
 
   const hours       = retainBreakdown?.generatedHours ?? 0
-  const dollarValue = retainBreakdown?.retainAmount   ?? 0
   const rulePath    = retainBreakdown?.retainRulePath
   const explanation = retainBreakdown?.retainExplanation
   const hasHours    = hours > 0
-  const rateMissing = retainHourlyRate <= 0
   const panelColor  = hasHours ? '#f9fafb' : '#9ca3af'
   const panelBg     = hasHours ? 'rgba(220,38,38,0.08)' : 'rgba(107,114,128,0.06)'
   const panelBorder = hasHours ? 'rgba(220,38,38,0.30)' : 'rgba(107,114,128,0.30)'
@@ -437,8 +426,8 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown, reta
         </p>
       </div>
 
-      {/* Hours-first calculated entitlement panel. Hours are the primary
-          value; dollars are derived from the retain hourly rate snapshot. */}
+      {/* Hours-only calculated entitlement panel. Retain tracks hours; there
+          is no derived dollar amount. */}
       <div style={{
         ...FIELD,
         padding: '12px 14px', borderRadius: '8px',
@@ -450,11 +439,6 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown, reta
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{ fontSize: '1.6rem', fontWeight: 800, color: panelColor }}>
             {hours.toFixed(2)} h
-          </div>
-          <div style={{ fontSize: '0.85rem', color: hasHours ? '#d1d5db' : '#6b7280' }}>
-            {rateMissing
-              ? '$ derived from hourly rate (set rate in Settings → Rates)'
-              : `= $${dollarValue.toFixed(2)} at $${retainHourlyRate.toFixed(2)}/h`}
           </div>
         </div>
         {explanation && (
@@ -923,8 +907,8 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         setError('Arrival Time must be a valid 24hr time (e.g. 08:30, 19:30).'); return
       }
     }
-    // Retain is hours-first: a claim with generated_hours > 0 is valid even if
-    // the dollar amount is $0 because the retainHourlyRate hasn't been set yet.
+    // Retain is hours-only: a claim with generated_hours > 0 is valid even
+    // though it carries no derived dollar amount.
     // For all other claim types the historical $0 guard still applies.
     if (claimType === 'retain') {
       if (!breakdown || !(breakdown.generatedHours > 0)) {
@@ -1051,7 +1035,6 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           onChange={handleFieldChange}
           mealEligibility={calcRetainMealEligibility({ shift: fields.shift, bookedOffTime: fields.bookedOffTime })}
           retainBreakdown={breakdown}
-          retainHourlyRate={Number(rates?.retainHourlyRate) || 0}
         />
       )}
       {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}

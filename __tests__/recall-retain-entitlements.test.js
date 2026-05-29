@@ -14,7 +14,9 @@ import {
   calculateRecallMealEntitlements,
   calcRetainMealEligibility,
   calcRecallClaim,
+  calcRetainClaim,
 } from '../lib/calculations/engine.js'
+import { RETAIN_OVERTIME_HOURLY_RATE } from '../lib/calculations/defaultRates.js'
 
 const RATES = {
   kilometreRate:      0.99,
@@ -259,5 +261,50 @@ describe('calcRetainMealEligibility — missing inputs', () => {
   test('no booked-off time → none', () => {
     const r = calcRetainMealEligibility({ shift: 'Night', bookedOffTime: '' })
     expect(r.tier).toBe('none')
+  })
+})
+
+// ─── calcRetainClaim — Maint Stn N/N dollar generation ───────────────────────
+// Retain $ = generated_hours × canonical overtime rate. The rate is fixed
+// (not user-editable), confirmed from FRV payslips: 4.00h = $404.09.
+
+describe('calcRetainClaim — Maint Stn N/N dollar derivation', () => {
+  test('canonical overtime rate is $101.0225/h', () => {
+    expect(RETAIN_OVERTIME_HOURLY_RATE).toBeCloseTo(101.0225, 4)
+  })
+
+  test('mandatory 4.00h minimum → Maint Stn N/N $404.09', () => {
+    const r = calcRetainClaim({ shift: 'Day', bookedOffTime: '19:00', overnightCash: 0 }, RATES)
+    expect(r.generatedHours).toBeCloseTo(4.00, 2)
+    expect(r.retainHourlyRate).toBeCloseTo(101.0225, 4)
+    expect(r.retainAmount).toBeCloseTo(404.09, 2)
+  })
+
+  test('1.25h derives $126.28 at the canonical rate', () => {
+    // Direct rate check independent of the hour rules.
+    const amount = Math.round((1.25 * RETAIN_OVERTIME_HOURLY_RATE) * 100) / 100
+    expect(amount).toBeCloseTo(126.28, 2)
+  })
+
+  test('4.00h retain + 1 large meal → total includes Maint Stn N/N $404.09 + $20.55', () => {
+    // Day 19:00 → 4.00h retain AND 1× Large meal (inclusive ≥19:00 threshold).
+    const r = calcRetainClaim({ shift: 'Day', bookedOffTime: '19:00', overnightCash: 0 }, RATES)
+    expect(r.retainAmount).toBeCloseTo(404.09, 2)
+    expect(r.largeCount).toBe(1)
+    expect(r.mealAmount).toBeCloseTo(20.55, 2)
+    expect(r.totalAmount).toBeCloseTo(404.09 + 20.55, 2) // 424.64
+  })
+
+  test('retain meal is a separate component — not folded into retainAmount', () => {
+    const r = calcRetainClaim({ shift: 'Day', bookedOffTime: '19:00', overnightCash: 0 }, RATES)
+    // Maint Stn N/N dollars and meal dollars are independent fields.
+    expect(r.retainAmount).toBeCloseTo(404.09, 2)
+    expect(r.mealAmount).toBeCloseTo(20.55, 2)
+  })
+
+  test('no retain hours (booked off at rostered finish) → $0', () => {
+    const r = calcRetainClaim({ shift: 'Day', bookedOffTime: '18:00', overnightCash: 0 }, RATES)
+    expect(r.generatedHours).toBe(0)
+    expect(r.retainAmount).toBe(0)
   })
 })

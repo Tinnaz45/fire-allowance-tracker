@@ -262,11 +262,13 @@ create table if not exists fat.retain (
   rmss_number        text,
   is_firecall        boolean default false,
   overnight_cash     numeric(8,2) default 0,
-  -- Hours-only retain (FRV rule). generated_hours is derived from shift +
-  -- booked_off_time by calcRetainHours(). Retain has no configurable hourly
-  -- rate and no derived dollar amount: retain_rate_used and retain_amount are
-  -- DEPRECATED (2026-05) and now always written as 0. Left in place (nullable)
-  -- to avoid a destructive migration; safe to drop in a future cleanup.
+  -- Hours-first retain (FRV rule). generated_hours is derived from shift +
+  -- booked_off_time by calcRetainHours(). The Maint Stn N/N dollar entitlement
+  -- (retain_amount) is derived = generated_hours × retain_rate_used, where
+  -- retain_rate_used is the CANONICAL FRV overtime hourly rate snapshot
+  -- (RETAIN_OVERTIME_HOURLY_RATE in defaultRates.js — a fixed award rate, NOT
+  -- user-editable). The snapshot is stored so historical claims reproduce
+  -- exactly even if the award rate changes later.
   generated_hours    numeric(6,2),
   retain_rate_used   numeric(8,2),
   retain_amount      numeric(8,2),

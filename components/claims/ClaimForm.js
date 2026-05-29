@@ -124,7 +124,10 @@ function CalcPreview({ breakdown, rates, onShowCalc }) {
   if (breakdown.nightMealie > 0)   lines.push('Night meal: $' + breakdown.nightMealie.toFixed(2))
   if (breakdown.mealAmount > 0)    lines.push((breakdown.mealLabel ? breakdown.mealLabel + ': ' : 'Meal allowance: ') + '$' + breakdown.mealAmount.toFixed(2))
   if (breakdown.generatedHours > 0) {
-    lines.push(`Retain: ${breakdown.generatedHours.toFixed(2)} h`)
+    const hrs    = breakdown.generatedHours.toFixed(2)
+    const rate   = (breakdown.retainHourlyRate ?? 0).toFixed(2)
+    const amount = (breakdown.retainAmount ?? 0).toFixed(2)
+    lines.push(`Maint stn N/N: ${hrs} h × $${rate}/h = $${amount}`)
   }
   if (breakdown.overnightCash > 0) lines.push('Overnight: $' + breakdown.overnightCash.toFixed(2))
 
@@ -387,6 +390,8 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
   const eligBorder= eligTier === 'none' ? 'rgba(107,114,128,0.3)' : 'rgba(34,197,94,0.3)'
 
   const hours       = retainBreakdown?.generatedHours ?? 0
+  const dollarValue = retainBreakdown?.retainAmount   ?? 0
+  const hourlyRate  = retainBreakdown?.retainHourlyRate ?? 0
   const rulePath    = retainBreakdown?.retainRulePath
   const explanation = retainBreakdown?.retainExplanation
   const hasHours    = hours > 0
@@ -426,19 +431,23 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
         </p>
       </div>
 
-      {/* Hours-only calculated entitlement panel. Retain tracks hours; there
-          is no derived dollar amount. */}
+      {/* Hours-first calculated entitlement panel. Hours are the primary value;
+          the Maint Stn N/N dollar amount is derived from the canonical FRV
+          overtime rate (fixed award rate, not user-editable). */}
       <div style={{
         ...FIELD,
         padding: '12px 14px', borderRadius: '8px',
         background: panelBg, border: '1px solid ' + panelBorder,
       }}>
         <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
-          Retain (auto-calculated)
+          Maint stn N/N (auto-calculated)
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{ fontSize: '1.6rem', fontWeight: 800, color: panelColor }}>
             {hours.toFixed(2)} h
+          </div>
+          <div style={{ fontSize: '0.85rem', color: hasHours ? '#d1d5db' : '#6b7280' }}>
+            {hasHours ? `= $${dollarValue.toFixed(2)} at $${hourlyRate.toFixed(2)}/h` : 'no retain hours'}
           </div>
         </div>
         {explanation && (
@@ -907,9 +916,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         setError('Arrival Time must be a valid 24hr time (e.g. 08:30, 19:30).'); return
       }
     }
-    // Retain is hours-only: a claim with generated_hours > 0 is valid even
-    // though it carries no derived dollar amount.
-    // For all other claim types the historical $0 guard still applies.
+    // Retain is hours-first: a claim with generated_hours > 0 is valid. The
+    // Maint Stn N/N dollar amount is derived from those hours via the canonical
+    // overtime rate. For all other claim types the historical $0 guard applies.
     if (claimType === 'retain') {
       if (!breakdown || !(breakdown.generatedHours > 0)) {
         setError('Enter shift + booked off time so retain hours can be calculated.'); return

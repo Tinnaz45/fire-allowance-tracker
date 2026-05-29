@@ -1,7 +1,8 @@
 // Verify FRV retain-hour rules against all supplied examples + edge cases.
 // Run: node scripts/verify-retain-hours.mjs
 
-import { calcRetainHours } from '../lib/calculations/engine.js'
+import { calcRetainHours, calcRetainClaim } from '../lib/calculations/engine.js'
+import { RETAIN_OVERTIME_HOURLY_RATE } from '../lib/calculations/defaultRates.js'
 
 const cases = [
   // ── Day shift ─────────────────────────────────────────────────────────────
@@ -51,6 +52,32 @@ for (const { shift, bookedOffTime, expected, label } of cases) {
 
 console.log()
 console.log(`Total: ${pass + fail}   Pass: ${pass}   Fail: ${fail}`)
+
+// ── Maint Stn N/N dollar derivation (canonical overtime rate) ─────────────────
+console.log()
+console.log(`── Maint Stn N/N $ derivation ($${RETAIN_OVERTIME_HOURLY_RATE.toFixed(4)}/h) ──`)
+const dollarCases = [
+  { shift: 'Day', bookedOffTime: '19:00', expectHours: 4.00, expectAmount: 404.09, label: '4.00h → Maint Stn N/N $404.09' },
+  { shift: 'Day', bookedOffTime: '22:15', expectHours: 4.25, expectAmount: 429.35, label: '4.25h → Maint Stn N/N $429.35' },
+]
+for (const { shift, bookedOffTime, expectHours, expectAmount, label } of dollarCases) {
+  const b = calcRetainClaim({ shift, bookedOffTime, overnightCash: 0 }, { smallMealAllowance: 10.90, largeMealAllowance: 20.55 })
+  const okH = Math.abs(b.generatedHours - expectHours) < 0.001
+  const okA = Math.abs(b.retainAmount - expectAmount) < 0.001
+  const ok = okH && okA
+  if (ok) pass++; else { fail++; failures.push({ label, expectHours, gotHours: b.generatedHours, expectAmount, gotAmount: b.retainAmount }) }
+  console.log(`${ok ? '✓' : '✗'} [${shift}] ${bookedOffTime} → ${b.generatedHours.toFixed(2)}h × $${b.retainHourlyRate.toFixed(4)} = $${b.retainAmount.toFixed(2)}  (${label})`)
+}
+// Direct rate spot-check: 1.25h → $126.28
+{
+  const amt = Math.round((1.25 * RETAIN_OVERTIME_HOURLY_RATE + Number.EPSILON) * 100) / 100
+  const ok = Math.abs(amt - 126.28) < 0.001
+  if (ok) pass++; else { fail++; failures.push({ label: '1.25h → $126.28', gotAmount: amt }) }
+  console.log(`${ok ? '✓' : '✗'} 1.25h × $${RETAIN_OVERTIME_HOURLY_RATE.toFixed(4)} = $${amt.toFixed(2)}  (expect $126.28)`)
+}
+
+console.log()
+console.log(`Total (incl. $): Pass: ${pass}   Fail: ${fail}`)
 
 if (fail > 0) {
   console.log()

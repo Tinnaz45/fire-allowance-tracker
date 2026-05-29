@@ -56,6 +56,7 @@ function resolveChildLabel(claim) {
   if (ai.autoChild === 'petty_cash_meal')           return 'Meal Allowance'
   if (ai.autoChild === 'petty_cash_travel_night')   return 'Small Meal Allowance' // legacy slug
   if (ai.autoChild === 'standby_small_meal')        return 'Small Meal Allowance'
+  if (ai.autoChild === 'retain_meal')               return (ai.largeMealCount ?? 0) > 0 ? ((ai.smallMealCount ?? 0) > 0 ? 'Large + Small Meal Allowance' : 'Large Meal Allowance') : 'Small Meal Allowance'
   if (ai.autoChild === 'maint_stn_nn')              return 'Maint Stn N/N'
   if (ai.autoChild === 'overnight_cash')            return 'Overnight Cash'
   if (ai.autoChild === 'standby_travel')            return 'Excess Travel' // legacy slug
@@ -63,6 +64,30 @@ function resolveChildLabel(claim) {
   if (ai.autoChild === 'standby_and_dismi')         return 'Standby&Dismi'
   if (ai.autoChild === 'md_event')                  return 'M&D'
   return CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType
+}
+
+// ─── Retain container hiding ───────────────────────────────────────────────────
+// Once retain entitlement children exist (Maint Stn N/N, meals), the retain
+// parent row is a pure grouping container — its dollars are already zeroed in
+// groupedView. Hide it so the card shows only meaningful entitlement rows.
+// This is display-only: groupedView (reconciliation, exports, persistence) keeps
+// the parent row intact.
+
+function isRetainContainerRow(claim, siblings) {
+  if (claim.claimType !== 'retain' || claim.calculation_inputs?.autoChild != null) return false
+  return siblings.some((c) => c.claimType === 'retain' && c.calculation_inputs?.autoChild != null)
+}
+
+function toDisplayEntry(entry) {
+  const visible = entry.children.filter((c) => !isRetainContainerRow(c, entry.children))
+  if (visible.length === entry.children.length) return entry
+  const totalCount = visible.length
+  const paidCount  = visible.filter((c) => (c.payment_status || 'Pending').toLowerCase() === 'paid').length
+  const derivedPaymentStatus =
+    totalCount > 0 && paidCount === totalCount ? 'Paid'
+    : paidCount > 0 ? 'Partially Paid'
+    : 'Pending'
+  return { ...entry, children: visible, totalCount, paidCount, derivedPaymentStatus }
 }
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
@@ -788,7 +813,10 @@ export default function ExpandableClaimList({
 
   // ── Build the displayable grouped + ungrouped lists ───────────────────────
 
-  const { grouped, ungrouped } = groupedView || { grouped: [], ungrouped: [] }
+  const { grouped: rawGrouped, ungrouped } = groupedView || { grouped: [], ungrouped: [] }
+
+  // Hide the retain grouping-container row from each group's display rows.
+  const grouped = rawGrouped.map(toDisplayEntry)
 
   // ── Build normalized filter spec (Phase 4) ─────────────────────────────────
   // Maps activeTab → paymentStatus filter consumed by filterUtils pipeline.

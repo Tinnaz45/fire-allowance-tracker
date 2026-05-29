@@ -263,10 +263,12 @@ create table if not exists fat.retain (
   is_firecall        boolean default false,
   overnight_cash     numeric(8,2) default 0,
   -- Hours-first retain (FRV rule). generated_hours is derived from shift +
-  -- booked_off_time by calcRetainHours(); retain_amount (the legacy dollar
-  -- column) is now derived = generated_hours × retain_hourly_rate snapshot.
-  -- retain_rate_used captures the hourly rate that was applied at create time
-  -- so historical claims reproduce exactly even if the rate changes later.
+  -- booked_off_time by calcRetainHours(). The Maint Stn N/N dollar entitlement
+  -- (retain_amount) is derived = generated_hours × retain_rate_used, where
+  -- retain_rate_used is the CANONICAL FRV overtime hourly rate snapshot
+  -- (RETAIN_OVERTIME_HOURLY_RATE in defaultRates.js — a fixed award rate, NOT
+  -- user-editable). The snapshot is stored so historical claims reproduce
+  -- exactly even if the award rate changes later.
   generated_hours    numeric(6,2),
   retain_rate_used   numeric(8,2),
   retain_amount      numeric(8,2),
@@ -370,15 +372,17 @@ create table if not exists fat.user_rates (
   kilometre_rate                numeric(8,4),
   small_meal_allowance          numeric(8,2),
   large_meal_allowance          numeric(8,2),
-  -- Retain hourly rate: applied to auto-generated retain hours (calcRetainHours()).
-  -- generated_amount = generated_hours × retain_hourly_rate. Defaults to NULL so
-  -- DEFAULT_RATES.retainHourlyRate (0.00) applies until the user sets a rate.
+  -- DEPRECATED (2026-05): retain is now hours-only — there is no configurable
+  -- retain hourly rate and no derived retain dollar amount. The app no longer
+  -- reads or writes this column. Left in place (nullable) to avoid a
+  -- destructive migration; safe to drop in a future cleanup migration.
   retain_hourly_rate            numeric(8,2),
   created_at                    timestamptz not null default now(),
   updated_at                    timestamptz not null default now()
 );
 
--- Backfill: add the new column to existing deployments (idempotent).
+-- Backfill: add the column to existing deployments (idempotent). Retained for
+-- backward compatibility only — see DEPRECATED note above.
 alter table fat.user_rates add column if not exists retain_hourly_rate numeric(8,2);
 
 

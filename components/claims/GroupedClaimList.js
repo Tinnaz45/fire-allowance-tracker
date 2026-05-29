@@ -15,6 +15,7 @@ import {
   formatDateDDMMYY,
 } from '@/lib/calculations/engine'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
+import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
 
 function resolveChildLabel(claim) {
   const ai = claim.calculation_inputs || {}
@@ -23,6 +24,7 @@ function resolveChildLabel(claim) {
   if (ai.autoChild === 'petty_cash_meal')           return 'Petty cash meal'
   if (ai.autoChild === 'petty_cash_travel_night')   return 'Small Meal Allowance' // legacy slug
   if (ai.autoChild === 'standby_small_meal')        return 'Small Meal Allowance'
+  if (ai.autoChild === 'retain_meal')               return (ai.largeMealCount ?? 0) > 0 ? ((ai.smallMealCount ?? 0) > 0 ? 'Large + Small Meal Allowance' : 'Large Meal Allowance') : 'Small Meal Allowance'
   if (ai.autoChild === 'maint_stn_nn')              return 'Maint stn N/N'
   if (ai.autoChild === 'overnight_cash')            return 'Overnight cash'
   if (ai.autoChild === 'standby_travel')            return 'Excess Travel' // legacy slug
@@ -37,6 +39,30 @@ function resolveComponentAmount(claim) {
     return Number(claim.component_amount)
   }
   return resolveEffectiveAmount(claim)
+}
+
+// ─── Retain container hiding ───────────────────────────────────────────────────
+// Once retain entitlement children exist (Maint Stn N/N, meals), the retain
+// parent row is a pure grouping container — its dollars are already zeroed in
+// groupedView. Hide it so the card shows only meaningful entitlement rows.
+// This is display-only: groupedView (reconciliation, exports, persistence) keeps
+// the parent row intact.
+
+function isRetainContainerRow(claim, siblings) {
+  if (claim.claimType !== 'retain' || claim.calculation_inputs?.autoChild != null) return false
+  return siblings.some((c) => c.claimType === 'retain' && c.calculation_inputs?.autoChild != null)
+}
+
+function toDisplayEntry(entry) {
+  const visible = entry.children.filter((c) => !isRetainContainerRow(c, entry.children))
+  if (visible.length === entry.children.length) return entry
+  const totalCount = visible.length
+  const paidCount  = visible.filter((c) => (c.payment_status || 'Pending').toLowerCase() === 'paid').length
+  const derivedPaymentStatus =
+    totalCount > 0 && paidCount === totalCount ? 'Paid'
+    : paidCount > 0 ? 'Partially Paid'
+    : 'Pending'
+  return { ...entry, children: visible, totalCount, paidCount, derivedPaymentStatus }
 }
 
 function StatusBadge({ status }) {
@@ -138,8 +164,9 @@ function QuickPayToggle({ claim, session, activeFY }) {
 // in a future cleanup once all rows have payment_status set.
 
 function ChildClaimRow({ claim, session, activeFY, isLast }) {
-  const { updateChildStatus } = useClaims()
+  const { updateChildStatus, deleteSubClaim } = useClaims()
   const [updating, setUpdating] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
   const label  = resolveChildLabel(claim)
   const amt    = resolveComponentAmount(claim)
   // LEGACY: status field kept for backward compat (old rows without payment_status)
@@ -172,7 +199,22 @@ function ChildClaimRow({ claim, session, activeFY, isLast }) {
         <button onClick={cycleStatus} disabled={updating} title="Legacy status (secondary)" style={{ background: 'none', border: 'none', padding: 0, cursor: updating ? 'wait' : 'pointer', opacity: updating ? 0.5 : 1 }}>
           <StatusBadge status={status} />
         </button>
+        <button onClick={() => setShowDelete(true)} title="Delete this sub-claim" aria-label="Delete sub-claim" style={{ padding: '3px 7px', borderRadius: '6px', border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
+          🗑
+        </button>
       </div>
+      {showDelete && (
+        <DeleteConfirmModal
+          title="Delete sub-claim"
+          message={`Permanently delete the “${label}” entitlement ($${amt.toFixed(2)})? The rest of this claim and its other entitlements will be kept.`}
+          confirmLabel="Delete sub-claim"
+          onClose={() => setShowDelete(false)}
+          onConfirm={async () => {
+            await deleteSubClaim({ userId: session.user.id, claim, financialYearId: activeFY?.id || null })
+            setShowDelete(false)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -181,9 +223,11 @@ function ChildClaimRow({ claim, session, activeFY, isLast }) {
 // All payment display and totals derive from payment_status only — no status fallback.
 
 function GroupCard({ groupEntry, session, activeFY }) {
+  const { deleteClaimGroup } = useClaims()
   // Destructure normalized fields from groupedView (computed in ClaimsContext)
   const { group, children, derivedPaymentStatus, paidCount, totalCount } = groupEntry
   const [collapsed, setCollapsed] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
 
   // NORMALIZED: pending or partially-paid groups can be overdue
   const isOverdue = (() => {
@@ -242,11 +286,32 @@ function GroupCard({ groupEntry, session, activeFY }) {
       {!collapsed && children.length === 0 && (
         <div style={{ padding: '12px 16px', fontSize: '0.8rem', color: '#4b5563', background: '#0f0f0f' }}>No payment components yet.</div>
       )}
+      {!collapsed && (
+        <div style={{ padding: '10px 16px 12px', background: '#0f0f0f', borderTop: '1px solid #1e1e1e' }}>
+          <button onClick={(e) => { e.stopPropagation(); setShowDelete(true) }} style={{ padding: '5px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '7px', color: '#f87171', cursor: 'pointer', fontSize: '0.74rem', fontWeight: 600 }}>
+            Delete Claim
+          </button>
+        </div>
+      )}
+      {showDelete && (
+        <DeleteConfirmModal
+          title="Delete Claim"
+          message={`Permanently delete “${group.label}” and all ${children.length} sub-claim${children.length !== 1 ? 's' : ''}? This removes the claim, every generated entitlement and any linked payment records. This cannot be undone.`}
+          confirmLabel="Delete Claim"
+          onClose={() => setShowDelete(false)}
+          onConfirm={async () => {
+            await deleteClaimGroup({ userId: session.user.id, group, financialYearId: activeFY?.id || null })
+            setShowDelete(false)
+          }}
+        />
+      )}
     </div>
   )
 }
 
 function UngroupedCard({ claim, onEdit, session, activeFY }) {
+  const { deleteSubClaim } = useClaims()
+  const [showDelete, setShowDelete] = useState(false)
   const overdue = isClaimOverdue(claim)
   const amt     = resolveComponentAmount(claim)
   return (
@@ -272,12 +337,29 @@ function UngroupedCard({ claim, onEdit, session, activeFY }) {
           </div>
         )}
         <StatusBadge status={claim.status} />
-        {onEdit && (
-          <button onClick={() => onEdit(claim)} style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #374151', borderRadius: '6px', color: '#9ca3af', cursor: 'pointer', fontSize: '0.74rem', fontWeight: 600 }}>
-            Edit
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {onEdit && (
+            <button onClick={() => onEdit(claim)} style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #374151', borderRadius: '6px', color: '#9ca3af', cursor: 'pointer', fontSize: '0.74rem', fontWeight: 600 }}>
+              Edit
+            </button>
+          )}
+          <button onClick={() => setShowDelete(true)} style={{ padding: '3px 10px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '6px', color: '#f87171', cursor: 'pointer', fontSize: '0.74rem', fontWeight: 600 }}>
+            Delete
           </button>
-        )}
+        </div>
       </div>
+      {showDelete && (
+        <DeleteConfirmModal
+          title="Delete Claim"
+          message={`Permanently delete this ${CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType} claim ($${amt.toFixed(2)})? This cannot be undone.`}
+          confirmLabel="Delete Claim"
+          onClose={() => setShowDelete(false)}
+          onConfirm={async () => {
+            await deleteSubClaim({ userId: session.user.id, claim, financialYearId: activeFY?.id || null })
+            setShowDelete(false)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -293,7 +375,10 @@ export default function GroupedClaimList({ session, activeFY, onEdit }) {
     </div>
   )
 
-  const { grouped, ungrouped } = groupedView || { grouped: [], ungrouped: [] }
+  const { grouped: rawGrouped, ungrouped } = groupedView || { grouped: [], ungrouped: [] }
+
+  // Hide the retain grouping-container row from each group's display rows.
+  const grouped = rawGrouped.map(toDisplayEntry)
 
   // NORMALIZED: filter by derivedPaymentStatus (canonical), not group.parent_status
   const pendingGroups = grouped.filter((g) => (g.derivedPaymentStatus || '').toLowerCase() !== 'paid')

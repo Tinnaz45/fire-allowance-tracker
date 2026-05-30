@@ -194,8 +194,8 @@ function PaymentMethodBadge({ method }) {
   )
 }
 
-// Payment progress is now shown via the shared <PaymentProgressBadge> (single
-// badge: "Outstanding (0 of 2 paid)" / "Partially Paid (1 of 2 paid)" / "Paid").
+// Payment progress is now shown via the shared <PaymentProgressBadge> (single,
+// deliberately understated badge: "Outstanding • 0/2" / "Part Paid • 1/2" / "Paid").
 
 // ─── QuickPayToggle ────────────────────────────────────────────────────────────
 // One-click "Mark Paid" per unpaid sub-claim. Updates payment_status + payment_date.
@@ -490,28 +490,34 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
             }}>
               {groupHeaderTitle(group)}
             </div>
-            {/* Line 2 — "[Shift] · Platoon [X] · [Date]" */}
+            {/* Line 2 — claim value (primary scannable figure) + item count */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: '8px',
+              flexWrap: 'wrap',
+              marginBottom: '5px',
+            }}>
+              <span style={{
+                fontSize: '1.2rem',
+                fontWeight: 800,
+                color: '#f9fafb',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
+                lineHeight: 1.1,
+              }}>
+                ${totalAmt.toFixed(2)}
+              </span>
+              <span style={{ fontSize: '0.71rem', color: '#6b7280' }}>
+                {children.length} item{children.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
             <ShiftPlatoonLine
               shift={resolveGroupShift(groupEntry)}
               platoon={resolveGroupPlatoon(groupEntry)}
               date={group.incident_date}
-              style={{ marginBottom: '2px' }}
             />
-            {/* Line 3 — existing summary metadata */}
-            <div style={{
-              fontSize: '0.71rem',
-              color: '#6b7280',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              flexWrap: 'wrap',
-            }}>
-              <span>{children.length} item{children.length !== 1 ? 's' : ''}</span>
-              <span>·</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                <strong style={{ color: '#e5e7eb' }}>${totalAmt.toFixed(2)}</strong>
-              </span>
-            </div>
           </div>
         </div>
 
@@ -656,19 +662,15 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
             </span>
           )}
         </div>
-        {/* Line 2 — "[Shift] · Platoon [X] · [Date]" */}
-        <ShiftPlatoonLine
-          shift={resolveClaimShift(claim)}
-          platoon={resolveClaimPlatoon(claim)}
-          date={claim.date}
-          style={{ marginBottom: '3px' }}
-        />
-        {/* Line 3 — amount */}
+        {/* Line 2 — amount (primary scannable figure) */}
         <div style={{
-          fontSize: '1rem',
-          fontWeight: 700,
+          fontSize: '1.2rem',
+          fontWeight: 800,
           color: '#f9fafb',
           fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '-0.01em',
+          lineHeight: 1.1,
+          marginBottom: '5px',
         }}>
           ${amt.toFixed(2)}
           {adjusted && (
@@ -677,8 +679,14 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
             </span>
           )}
         </div>
+        {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
+        <ShiftPlatoonLine
+          shift={resolveClaimShift(claim)}
+          platoon={resolveClaimPlatoon(claim)}
+          date={claim.date}
+        />
         {(claim.payslip_pay_nbr || claim.payment_method) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
             {claim.payslip_pay_nbr && (
               <span style={{ fontSize: '0.69rem', color: '#6b7280' }}>
                 Pay #{claim.payslip_pay_nbr}

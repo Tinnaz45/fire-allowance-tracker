@@ -273,20 +273,27 @@ function GroupCard({ groupEntry, session, activeFY }) {
           <div style={{ minWidth: 0 }}>
             {/* Line 1 — "[Claim Type] #[Number]" */}
             <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#f9fafb', marginBottom: '3px' }}>{groupHeaderTitle(group)}</div>
-            {/* Line 2 — "[Shift] · Platoon [X] · [Date]" */}
+            {/* Line 2 — claim value (primary scannable figure) + item count + paid-so-far */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>
+              <span style={{
+                fontSize: '1.2rem',
+                fontWeight: 800,
+                color: '#f9fafb',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
+                lineHeight: 1.1,
+              }}>
+                ${totalAmt.toFixed(2)}
+              </span>
+              <span style={{ fontSize: '0.72rem', color: '#6b7280' }}>{children.length} item{children.length !== 1 ? 's' : ''}</span>
+              {paidAmt > 0 && paidAmt < totalAmt && <span style={{ fontSize: '0.72rem', color: '#4ade80', fontVariantNumeric: 'tabular-nums' }}>${paidAmt.toFixed(2)} paid</span>}
+            </div>
+            {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
             <ShiftPlatoonLine
               shift={resolveGroupShift(groupEntry)}
               platoon={resolveGroupPlatoon(groupEntry)}
               date={group.incident_date}
-              style={{ marginBottom: '2px' }}
             />
-            {/* Line 3 — existing summary metadata */}
-            <div style={{ fontSize: '0.72rem', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-              <span>{children.length} item{children.length !== 1 ? 's' : ''}</span>
-              <span>·</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>Total: <strong style={{ color: '#f9fafb' }}>${totalAmt.toFixed(2)}</strong></span>
-              {paidAmt > 0 && paidAmt < totalAmt && <span style={{ color: '#4ade80', fontVariantNumeric: 'tabular-nums' }}>· Paid: ${paidAmt.toFixed(2)}</span>}
-            </div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -342,17 +349,16 @@ function UngroupedCard({ claim, onEdit, session, activeFY }) {
           {claimHeaderTitle(claim)}
           {overdue && <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700, fontSize: '0.72rem' }}>🚩 Overdue</span>}
         </div>
-        {/* Line 2 — "[Shift] · Platoon [X] · [Date]" */}
+        {/* Line 2 — amount (primary scannable figure) */}
+        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#f9fafb', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.01em', lineHeight: 1.1, marginBottom: '5px' }}>${amt.toFixed(2)}</div>
+        {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
         <ShiftPlatoonLine
           shift={resolveClaimShift(claim)}
           platoon={resolveClaimPlatoon(claim)}
           date={claim.date}
-          style={{ marginBottom: '3px' }}
         />
-        {/* Line 3 — amount */}
-        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f9fafb', fontVariantNumeric: 'tabular-nums' }}>${amt.toFixed(2)}</div>
         {(claim.payslip_pay_nbr || claim.payment_method) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
             {claim.payslip_pay_nbr && <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>Pay #{claim.payslip_pay_nbr}</span>}
             <PaymentMethodBadge method={claim.payment_method} />
           </div>

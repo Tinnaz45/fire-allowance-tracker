@@ -5,16 +5,19 @@
 //
 // Replaces the old two-element combination (a "0/2 paid" pill + a separate
 // "Pending" status badge) which forced the reader to mentally combine two chips.
-// One badge now states both the status word AND the progress count:
+// One badge now states both the status word AND the progress count, in a compact
+// form deliberately kept SECONDARY to the claim value:
 //
-//   Outstanding      (0 of 2 paid)   — amber   · nothing paid yet
-//   Partially Paid   (1 of 2 paid)   — indigo  · some paid
-//   Paid             (2 of 2 paid)   — green   · all paid
+//   Outstanding • 0/2   — amber   · nothing paid yet
+//   Part Paid • 1/2     — indigo  · some paid
+//   Paid • 2/2          — green   · all paid
 //
 // A leading status dot gives an at-a-glance colour cue; the count is rendered in
 // a muted tone so the status word stays dominant. For single-component claims
-// (total ≤ 1) the redundant "(1 of 1 paid)" count is dropped — just "Paid" /
-// "Outstanding" — so the same component reads cleanly for both groups and flat cards.
+// (total ≤ 1) the redundant "1/1" count is dropped — just "Paid" / "Outstanding"
+// — so the same component reads cleanly for both groups and flat cards. Weight,
+// padding and size are intentionally light so payment status never out-shouts the
+// dollar value (the primary scannable fact on the card).
 //
 // CANONICAL TRUTH: derives purely from paidCount / totalCount, which both list
 // views compute from payment_status only (see ClaimsContext groupedView). This
@@ -23,7 +26,7 @@
 
 const THEME = {
   paid:    { label: 'Paid',           bg: 'rgba(34,197,94,0.15)',  border: 'rgba(34,197,94,0.45)', color: '#86efac', dot: '#22c55e' },
-  partial: { label: 'Partially Paid', bg: 'rgba(99,102,241,0.15)', border: 'rgba(99,102,241,0.45)', color: '#a5b4fc', dot: '#818cf8' },
+  partial: { label: 'Part Paid', bg: 'rgba(99,102,241,0.15)', border: 'rgba(99,102,241,0.45)', color: '#a5b4fc', dot: '#818cf8' },
   pending: { label: 'Outstanding',    bg: 'rgba(234,179,8,0.13)',  border: 'rgba(234,179,8,0.4)',  color: '#fde68a', dot: '#eab308' },
 }
 
@@ -48,12 +51,12 @@ export default function PaymentProgressBadge({ paidCount = 0, totalCount = 0 }) 
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: '5px',
-        padding: '3px 10px',
+        gap: '4px',
+        padding: '2px 7px',
         borderRadius: '999px',
-        fontSize: '0.7rem',
-        fontWeight: 700,
-        letterSpacing: '0.02em',
+        fontSize: '0.64rem',
+        fontWeight: 600,
+        letterSpacing: '0.01em',
         flexShrink: 0,
         whiteSpace: 'nowrap',
         background: theme.bg,
@@ -64,8 +67,8 @@ export default function PaymentProgressBadge({ paidCount = 0, totalCount = 0 }) 
       <span
         aria-hidden="true"
         style={{
-          width: '7px',
-          height: '7px',
+          width: '6px',
+          height: '6px',
           borderRadius: '999px',
           background: theme.dot,
           flexShrink: 0,
@@ -73,8 +76,8 @@ export default function PaymentProgressBadge({ paidCount = 0, totalCount = 0 }) 
       />
       {theme.label}
       {showCount && (
-        <span style={{ fontWeight: 600, opacity: 0.7, fontVariantNumeric: 'tabular-nums' }}>
-          ({paidCount} of {totalCount} paid)
+        <span style={{ opacity: 0.65, fontVariantNumeric: 'tabular-nums' }}>
+          • {paidCount}/{totalCount}
         </span>
       )}
     </span>

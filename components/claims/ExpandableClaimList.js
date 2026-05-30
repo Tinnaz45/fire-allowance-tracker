@@ -500,8 +500,8 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
             }}>
               <span style={{
                 fontSize: '1.2rem',
-                fontWeight: 800,
-                color: '#f9fafb',
+                fontWeight: 600,
+                color: '#f3f4f6',
                 fontVariantNumeric: 'tabular-nums',
                 letterSpacing: '-0.01em',
                 lineHeight: 1.1,
@@ -665,8 +665,8 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
         {/* Line 2 — amount (primary scannable figure) */}
         <div style={{
           fontSize: '1.2rem',
-          fontWeight: 800,
-          color: '#f9fafb',
+          fontWeight: 600,
+          color: '#f3f4f6',
           fontVariantNumeric: 'tabular-nums',
           letterSpacing: '-0.01em',
           lineHeight: 1.1,

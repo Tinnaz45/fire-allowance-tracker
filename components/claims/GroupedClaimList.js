@@ -277,8 +277,8 @@ function GroupCard({ groupEntry, session, activeFY }) {
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>
               <span style={{
                 fontSize: '1.2rem',
-                fontWeight: 800,
-                color: '#f9fafb',
+                fontWeight: 600,
+                color: '#f3f4f6',
                 fontVariantNumeric: 'tabular-nums',
                 letterSpacing: '-0.01em',
                 lineHeight: 1.1,
@@ -350,7 +350,7 @@ function UngroupedCard({ claim, onEdit, session, activeFY }) {
           {overdue && <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700, fontSize: '0.72rem' }}>🚩 Overdue</span>}
         </div>
         {/* Line 2 — amount (primary scannable figure) */}
-        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#f9fafb', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.01em', lineHeight: 1.1, marginBottom: '5px' }}>${amt.toFixed(2)}</div>
+        <div style={{ fontSize: '1.2rem', fontWeight: 600, color: '#f3f4f6', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.01em', lineHeight: 1.1, marginBottom: '5px' }}>${amt.toFixed(2)}</div>
         {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
         <ShiftPlatoonLine
           shift={resolveClaimShift(claim)}

@@ -30,6 +30,8 @@ import {
   resolveClaimPlatoon,
   resolveGroupShift,
   resolveGroupPlatoon,
+  resolveClaimStations,
+  resolveGroupStations,
 } from '@/lib/claims/claimMeta'
 import {
   resolveEffectiveAmount,
@@ -44,6 +46,7 @@ import {
   sortUngroupedClaims,
 } from '@/lib/reconciliation/filterUtils'
 import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
+import StationContextLine from '@/components/claims/StationContextLine'
 import PaymentProgressBadge from '@/components/claims/PaymentProgressBadge'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
@@ -518,6 +521,8 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
               platoon={resolveGroupPlatoon(groupEntry)}
               date={group.incident_date}
             />
+            {/* Line 4 — captured station context (omitted when none) */}
+            <StationContextLine stations={resolveGroupStations(groupEntry)} />
           </div>
         </div>
 
@@ -685,6 +690,8 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
           platoon={resolveClaimPlatoon(claim)}
           date={claim.date}
         />
+        {/* Line 4 — captured station context (omitted when none) */}
+        <StationContextLine stations={resolveClaimStations(claim)} />
         {(claim.payslip_pay_nbr || claim.payment_method) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
             {claim.payslip_pay_nbr && (

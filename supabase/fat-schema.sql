@@ -300,6 +300,8 @@ create table if not exists fat.standby (
   standby_type       text check (standby_type in ('Standby','M&D')),
   rostered_stn_id    integer,
   standby_stn_id     integer,
+  rostered_stn_label text,
+  standby_stn_label  text,
   platoon            text,
   shift              text check (shift in ('Day','Night')),
   arrived            text,
@@ -332,6 +334,18 @@ create table if not exists fat.standby (
 -- creation by resolveOperationalPlatoon(date, shift).
 alter table fat.standby add column if not exists platoon text;
 
+-- Operational-context standardisation (additive, nullable). Rostered station
+-- (Recall-style profile-autofilled origin) + destination/event station label
+-- on Standby/M&D. Previously the destination station was only kept inside
+-- calculation_inputs; it is now a first-class column for reconciliation/audit.
+alter table fat.standby add column if not exists rostered_stn_label text;
+alter table fat.standby add column if not exists standby_stn_label  text;
+
+-- Operational station label on meal claims (Spoilt + Delayed share this table).
+-- platoon already exists above; this adds the operational-station context so meal
+-- claims capture where the meal event occurred for reconciliation/audit.
+alter table fat.spoilt_meals add column if not exists operational_stn_label text;
+
 create table if not exists fat.spoilt_meals (
   id                 uuid primary key default gen_random_uuid(),
   user_id            uuid not null references auth.users(id) on delete cascade,
@@ -339,6 +353,7 @@ create table if not exists fat.spoilt_meals (
   meal_type          text check (meal_type in ('Spoilt','Delayed','Large','Double','Spoilt / Meal')),
   station_id         integer,
   claim_stn_id       integer,
+  operational_stn_label text,
   platoon            text,
   shift              text check (shift in ('Day','Night')),
   call_time          text,

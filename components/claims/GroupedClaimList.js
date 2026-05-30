@@ -14,12 +14,15 @@ import {
   resolveClaimPlatoon,
   resolveGroupShift,
   resolveGroupPlatoon,
+  resolveClaimStations,
+  resolveGroupStations,
 } from '@/lib/claims/claimMeta'
 import {
   resolveEffectiveAmount,
   isClaimOverdue,
 } from '@/lib/calculations/engine'
 import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
+import StationContextLine from '@/components/claims/StationContextLine'
 import PaymentProgressBadge from '@/components/claims/PaymentProgressBadge'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
@@ -294,6 +297,8 @@ function GroupCard({ groupEntry, session, activeFY }) {
               platoon={resolveGroupPlatoon(groupEntry)}
               date={group.incident_date}
             />
+            {/* Line 4 — captured station context (omitted when none) */}
+            <StationContextLine stations={resolveGroupStations(groupEntry)} />
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -357,6 +362,8 @@ function UngroupedCard({ claim, onEdit, session, activeFY }) {
           platoon={resolveClaimPlatoon(claim)}
           date={claim.date}
         />
+        {/* Line 4 — captured station context (omitted when none) */}
+        <StationContextLine stations={resolveClaimStations(claim)} />
         {(claim.payslip_pay_nbr || claim.payment_method) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
             {claim.payslip_pay_nbr && <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>Pay #{claim.payslip_pay_nbr}</span>}

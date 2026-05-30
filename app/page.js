@@ -7,10 +7,11 @@ import { useClaims } from '@/lib/claims/ClaimsContext'
 import { useRates } from '@/lib/calculations/RatesContext'
 import { useFY } from '@/lib/fy/FinancialYearContext'
 import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
-import { resolveClaimShift } from '@/lib/claims/claimMeta'
+import { resolveClaimShift, resolveClaimPlatoon } from '@/lib/claims/claimMeta'
 import { resolveOperationalPlatoon } from '@/lib/platoon/resolveOperationalPlatoon'
 import ClaimForm from '@/components/claims/ClaimForm'
 import PlatoonBanner from '@/components/claims/PlatoonBanner'
+import PlatoonPicker from '@/components/profile/PlatoonPicker'
 import ExpandableClaimList from '@/components/claims/ExpandableClaimList'
 import GroupedClaimList from '@/components/claims/GroupedClaimList'
 import AppShell from '@/components/nav/AppShell'
@@ -54,9 +55,17 @@ function EditClaimModal({ claim, session, activeFY, onClose, onSuccess }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
-  // Platoon is auto-derived from date + shift (deterministic FRV rotation) —
-  // it is never edited independently, mirroring the claim-creation flow.
-  const resolvedPlatoon = resolveOperationalPlatoon(date, shift)
+  // Meal claims (Spoilt / Delayed) expose a manual platoon override at creation
+  // time, so the edit flow must let that captured value survive an edit rather
+  // than silently re-deriving it. For every other claim type platoon stays a
+  // deterministic auto-derived value (date + shift), unchanged from before.
+  const isMeal = claim.claimType === 'spoilt' || claim.claimType === 'delayed_meal'
+  const [mealPlatoon, setMealPlatoon] = useState(resolveClaimPlatoon(claim) || '')
+
+  // Auto-derived platoon (deterministic FRV rotation). For meal claims an
+  // explicit override wins; otherwise this auto value is used everywhere.
+  const autoPlatoon = resolveOperationalPlatoon(date, shift)
+  const resolvedPlatoon = isMeal ? (mealPlatoon || autoPlatoon) : autoPlatoon
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -121,6 +130,16 @@ function EditClaimModal({ claim, session, activeFY, onClose, onSuccess }) {
             <PlatoonBanner date={date} shift={shift} />
           </div>
         </div>
+
+        {isMeal && (
+          <div style={{ marginBottom: '16px' }}>
+            <label style={LABEL_STYLE}>Platoon</label>
+            <PlatoonPicker value={resolvedPlatoon || ''} onChange={setMealPlatoon} idPrefix="edit-meal-platoon" />
+            <p style={{ marginTop: '4px', fontSize: '0.74rem', color: '#6b7280' }}>
+              Auto-resolved from date + shift{autoPlatoon ? ` (Platoon ${autoPlatoon})` : ''}. Override if different for this meal.
+            </p>
+          </div>
+        )}
 
         <div style={{ marginBottom: '16px' }}>
           <label style={LABEL_STYLE}>Amount ($)</label>

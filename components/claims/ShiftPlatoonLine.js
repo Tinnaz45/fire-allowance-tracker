@@ -1,11 +1,12 @@
 'use client'
 
 // ─── ShiftPlatoonLine ──────────────────────────────────────────────────────────
-// Card sub-header line: "[Shift] · Platoon [X] · [Date]".
+// Card sub-header line: "[Date]  [Shift] [Platoon]".
 //
-// Renders compact colour-coded chips so a claim's shift type and operational
-// platoon are identifiable at a glance from the My Claims list. Colours mirror
-// the canonical sources of truth:
+// The date LEADS the line — rendered larger and high-contrast so it reads as the
+// primary scannable fact, no longer visually lost beside the chips. The shift and
+// platoon chips follow as compact colour-coded tags. Colours mirror the canonical
+// sources of truth:
 //   - Shift chip → ShiftPicker theme (Day = amber, Night = indigo)
 //   - Platoon chip → shared platoon theme (lib/platoon/theme.js)
 //
@@ -73,15 +74,23 @@ export default function ShiftPlatoonLine({ shift, platoon, date, style }) {
     <div style={{
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
+      gap: '8px',
       flexWrap: 'wrap',
-      fontSize: '0.71rem',
-      color: '#6b7280',
       ...style,
     }}>
+      {date && (
+        <span style={{
+          fontSize: '0.86rem',
+          fontWeight: 700,
+          color: '#e5e7eb',
+          letterSpacing: '0.01em',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {formatDateDDMMYY(date)}
+        </span>
+      )}
       <ShiftChip shift={shift} />
       <PlatoonChip platoon={platoon} />
-      {date && <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDateDDMMYY(date)}</span>}
     </div>
   )
 }

@@ -44,6 +44,7 @@ import {
   sortUngroupedClaims,
 } from '@/lib/reconciliation/filterUtils'
 import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
+import PaymentProgressBadge from '@/components/claims/PaymentProgressBadge'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
 
@@ -193,32 +194,8 @@ function PaymentMethodBadge({ method }) {
   )
 }
 
-// ─── ProgressPill ─────────────────────────────────────────────────────────────
-// Shows "2/3 paid" progress for a parent claim group.
-
-function ProgressPill({ paid, total }) {
-  if (total === 0) return null
-  const allPaid  = paid === total
-  const partial  = paid > 0 && paid < total
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px',
-      padding: '2px 8px',
-      borderRadius: '5px',
-      fontSize: '0.66rem',
-      fontWeight: 700,
-      letterSpacing: '0.02em',
-      flexShrink: 0,
-      background: allPaid ? 'rgba(34,197,94,0.12)' : partial ? 'rgba(99,102,241,0.1)' : 'rgba(234,179,8,0.08)',
-      border:     allPaid ? '1px solid rgba(34,197,94,0.35)' : partial ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(234,179,8,0.25)',
-      color:      allPaid ? '#86efac' : partial ? '#a5b4fc' : '#fde68a',
-    }}>
-      {paid}/{total} paid
-    </span>
-  )
-}
+// Payment progress is now shown via the shared <PaymentProgressBadge> (single
+// badge: "Outstanding (0 of 2 paid)" / "Partially Paid (1 of 2 paid)" / "Paid").
 
 // ─── QuickPayToggle ────────────────────────────────────────────────────────────
 // One-click "Mark Paid" per unpaid sub-claim. Updates payment_status + payment_date.
@@ -563,12 +540,9 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
               🚩 Overdue
             </span>
           )}
-          {/* Progress pill: always from payment_status canonical source */}
-          {totalCount > 0 && (
-            <ProgressPill paid={paidCount} total={totalCount} />
-          )}
-          {/* Status badge: shows derivedPaymentStatus (canonical), not DB parent_status */}
-          <StatusBadge status={derivedPaymentStatus} />
+          {/* Single payment-progress badge — status word + count in one chip.
+              Canonical: paidCount/totalCount from payment_status (ClaimsContext). */}
+          <PaymentProgressBadge paidCount={paidCount} totalCount={totalCount} />
         </div>
       </div>
 
@@ -723,11 +697,14 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
         gap: '6px',
         flexShrink: 0,
       }}>
-        {/* FlatClaimCard = ungrouped/legacy claims only.
-            payment_status badge if set; otherwise status badge (these rows
-            predate multi-component architecture and have no payment_status). */}
+        {/* FlatClaimCard = ungrouped/legacy claims only. Single-component, so the
+            shared progress badge renders as a plain "Paid"/"Pending" (count
+            dropped). Truly legacy rows (no payment_status) keep the status badge. */}
         {claim.payment_status != null
-          ? <PaymentStatusBadge paymentStatus={claim.payment_status} />
+          ? <PaymentProgressBadge
+              paidCount={(claim.payment_status || '').toLowerCase() === 'paid' ? 1 : 0}
+              totalCount={1}
+            />
           : <StatusBadge status={claim.status} />
         }
         <div style={{ display: 'flex', gap: '6px' }}>

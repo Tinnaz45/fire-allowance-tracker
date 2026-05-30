@@ -20,6 +20,7 @@ import {
   isClaimOverdue,
 } from '@/lib/calculations/engine'
 import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
+import PaymentProgressBadge from '@/components/claims/PaymentProgressBadge'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
 
@@ -264,16 +265,6 @@ function GroupCard({ groupEntry, session, activeFY }) {
     .filter((c) => (c.payment_status || 'Pending').toLowerCase() === 'paid')
     .reduce((sum, c) => sum + resolveComponentAmount(c), 0)
 
-  // CANONICAL: pending count from paidCount + totalCount (from ClaimsContext)
-  const pendingCount = totalCount - paidCount
-
-  // Payment badge always derived from derivedPaymentStatus (canonical truth)
-  const paymentBadge = (() => {
-    if (totalCount === 0) return null
-    if (derivedPaymentStatus === 'Paid')           return { text: '✓ All Paid',                    color: '#86efac', bg: 'rgba(34,197,94,0.12)',    border: 'rgba(34,197,94,0.4)'    }
-    if (derivedPaymentStatus === 'Partially Paid') return { text: `${paidCount}/${totalCount} Paid`, color: '#a5b4fc', bg: 'rgba(99,102,241,0.1)',   border: 'rgba(99,102,241,0.35)'  }
-    return { text: `0/${totalCount} Paid`, color: '#fde68a', bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.25)' }
-  })()
   return (
     <div style={{ borderRadius: '12px', border: isOverdue ? '1.5px solid rgba(239,68,68,0.5)' : '1px solid #2a2a2a', background: isOverdue ? 'rgba(251,191,36,0.03)' : '#111', marginBottom: '12px', overflow: 'hidden' }}>
       <div onClick={() => setCollapsed((v) => !v)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer', borderBottom: collapsed ? 'none' : '1px solid #1e1e1e', gap: '8px', background: '#161616' }}>
@@ -300,9 +291,9 @@ function GroupCard({ groupEntry, session, activeFY }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {isOverdue && <span style={{ fontSize: '0.64rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '4px', padding: '2px 6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>🚩 Overdue</span>}
-          {paymentBadge && <span style={{ fontSize: '0.65rem', fontWeight: 700, color: paymentBadge.color, background: paymentBadge.bg, border: '1px solid ' + paymentBadge.border, borderRadius: '5px', padding: '2px 7px', letterSpacing: '0.03em' }}>{paymentBadge.text}</span>}
-          {/* CANONICAL: show derivedPaymentStatus badge, not DB parent_status */}
-          <StatusBadge status={derivedPaymentStatus} />
+          {/* Single payment-progress badge — status word + count in one chip.
+              Canonical: paidCount/totalCount from payment_status (ClaimsContext). */}
+          <PaymentProgressBadge paidCount={paidCount} totalCount={totalCount} />
         </div>
       </div>
       {!collapsed && children.length > 0 && (
@@ -368,13 +359,20 @@ function UngroupedCard({ claim, onEdit, session, activeFY }) {
         )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
-        {claim.payment_status != null && (
+        {/* Single-component ungrouped claim: shared progress badge renders as a
+            plain "Paid"/"Pending". Truly legacy rows (no payment_status) keep the
+            legacy status badge — mirrors FlatClaimCard for cross-view consistency. */}
+        {claim.payment_status != null ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <PaymentStatusBadge paymentStatus={claim.payment_status} />
+            <PaymentProgressBadge
+              paidCount={(claim.payment_status || '').toLowerCase() === 'paid' ? 1 : 0}
+              totalCount={1}
+            />
             <QuickPayToggle claim={claim} session={session} activeFY={activeFY} />
           </div>
+        ) : (
+          <StatusBadge status={claim.status} />
         )}
-        <StatusBadge status={claim.status} />
         <div style={{ display: 'flex', gap: '6px' }}>
           {onEdit && (
             <button onClick={() => onEdit(claim)} style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #374151', borderRadius: '6px', color: '#9ca3af', cursor: 'pointer', fontSize: '0.74rem', fontWeight: 600 }}>

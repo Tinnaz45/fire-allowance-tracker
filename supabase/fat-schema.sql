@@ -300,6 +300,7 @@ create table if not exists fat.standby (
   standby_type       text check (standby_type in ('Standby','M&D')),
   rostered_stn_id    integer,
   standby_stn_id     integer,
+  platoon            text,
   shift              text check (shift in ('Day','Night')),
   arrived            text,
   arrived_time       text,
@@ -324,6 +325,12 @@ create table if not exists fat.standby (
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now()
 );
+
+-- Backfill standby.platoon on existing deployments (idempotent). The other
+-- operational tables (recalls / retain / spoilt_meals) already carry `platoon`;
+-- standby was the only one missing it. Populated automatically at claim
+-- creation by resolveOperationalPlatoon(date, shift).
+alter table fat.standby add column if not exists platoon text;
 
 create table if not exists fat.spoilt_meals (
   id                 uuid primary key default gen_random_uuid(),

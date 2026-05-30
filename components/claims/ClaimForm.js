@@ -19,6 +19,7 @@ import StationDistanceField from '@/components/distance/StationDistanceField'
 import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField'
 import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
 import ShiftPicker from '@/components/claims/ShiftPicker'
+import PlatoonBanner from '@/components/claims/PlatoonBanner'
 import StationPicker from '@/components/claims/StationPicker'
 import TimeInput24 from '@/components/claims/TimeInput24'
 import {
@@ -197,7 +198,7 @@ function AdjustedAmountField({ calculatedAmount, adjustedAmount, onChange }) {
 
 // ─── Sub-form: Recall ─────────────────────────────────────────────────────────
 
-function RecallInputs({ values, onChange, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta, entitlement }) {
+function RecallInputs({ values, onChange, date, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta, entitlement }) {
   const rosterLabel = profile?.stationLabel || ''
 
   // Station resolution is gated on EXPLICIT selection only — typing a fuzzy
@@ -283,6 +284,10 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
           <option value="Night">Night Shift</option>
         </select>
         <p style={HELP_STYLE}>Required. Drives meal entitlement and standard-shift boundary.</p>
+
+        <div style={{ marginTop: 10 }}>
+          <PlatoonBanner date={date} shift={values.shift} />
+        </div>
 
         <label style={{
           display: 'flex', alignItems: 'center', gap: 8,
@@ -383,7 +388,7 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
 
 // ─── Sub-form: Retain ─────────────────────────────────────────────────────────
 
-function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
+function RetainInputs({ values, onChange, date, mealEligibility, retainBreakdown }) {
   const eligTier = mealEligibility?.tier || 'none'
   const eligColor = eligTier === 'none' ? '#9ca3af' : '#4ade80'
   const eligBg    = eligTier === 'none' ? 'rgba(107,114,128,0.08)' : 'rgba(34,197,94,0.08)'
@@ -416,6 +421,9 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
           {' '}{values.shift === 'Night' ? '09:00' : '19:00'} · flat-end
           {' '}{values.shift === 'Night' ? '12:00' : '22:00'}.
         </p>
+        <div style={{ marginTop: 10 }}>
+          <PlatoonBanner date={date} shift={values.shift} />
+        </div>
       </div>
 
       <div style={FIELD}>
@@ -503,7 +511,7 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
 
 // ─── Sub-form: Standby ────────────────────────────────────────────────────────
 
-function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, stations, onStandbyMeta }) {
+function StandbyInputs({ values, onChange, date, nightMealEligible, profile, userId, stations, onStandbyMeta }) {
   // Resolve rostered + standby stations from the profile / typed text. Mirrors
   // the Recall flow so the user gets the same chip feedback + auto-distance UX.
   const rosterStation = (() => {
@@ -556,6 +564,9 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
           value={values.shift}
           onChange={(v) => onChange('shift', v)}
         />
+        <div style={{ marginTop: 10 }}>
+          <PlatoonBanner date={date} shift={values.shift} />
+        </div>
       </div>
 
       {/* Arrival time is required for both Day and Night standby (Standby
@@ -610,7 +621,7 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
 // When 'delayed_meal', the Meal Type selector is hidden — meal_type is forced to
 // 'Delayed' by the virtual claimType resolution in ClaimsContext/addClaim.
 
-function SpoiltInputs({ values, onChange, claimType }) {
+function SpoiltInputs({ values, onChange, date, claimType }) {
   const mealWin = getMealWindow(values.shift)
   const incidentStatus = values.incidentTime
     ? checkTimeInMealWindow(values.incidentTime, values.shift)
@@ -651,6 +662,9 @@ function SpoiltInputs({ values, onChange, claimType }) {
           borderRadius: '6px', fontSize: '0.78rem', color: '#9ca3af',
         }}>
           {values.shift} shift meal window: <strong style={{ color: '#e5e7eb' }}>{mealWin.label}</strong>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <PlatoonBanner date={date} shift={values.shift} />
         </div>
       </div>
 
@@ -1037,18 +1051,19 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
       </div>
 
-      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} entitlement={recallEntitlement} />}
+      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} date={date} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} entitlement={recallEntitlement} />}
       {claimType === 'retain'       && (
         <RetainInputs
           values={fields}
           onChange={handleFieldChange}
+          date={date}
           mealEligibility={calcRetainMealEligibility({ shift: fields.shift, bookedOffTime: fields.bookedOffTime })}
           retainBreakdown={breakdown}
         />
       )}
-      {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
+      {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} date={date} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
       {(claimType === 'spoilt' || claimType === 'delayed_meal') && (
-        <SpoiltInputs values={fields} onChange={handleFieldChange} claimType={claimType} />
+        <SpoiltInputs values={fields} onChange={handleFieldChange} date={date} claimType={claimType} />
       )}
 
       {showCalcLines && (

@@ -10,12 +10,32 @@ import { useState } from 'react'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import {
+  resolveClaimShift,
+  resolveClaimPlatoon,
+  resolveGroupShift,
+  resolveGroupPlatoon,
+} from '@/lib/claims/claimMeta'
+import {
   resolveEffectiveAmount,
   isClaimOverdue,
-  formatDateDDMMYY,
 } from '@/lib/calculations/engine'
+import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
+
+// Line 1 of a claim card: "[Claim Type] #[Number]". Falls back to the persisted
+// group label (which already embeds the number) when claim number is absent.
+function groupHeaderTitle(group) {
+  const typeLabel = CLAIM_TYPE_LABELS[group?.claim_type] || group?.claim_type || 'Claim'
+  if (group?.claim_number != null) return `${typeLabel} #${group.claim_number}`
+  return group?.label || typeLabel
+}
+
+function claimHeaderTitle(claim) {
+  const typeLabel = CLAIM_TYPE_LABELS[claim?.claimType] || claim?.claimType || 'Claim'
+  if (claim?.claim_number != null) return `${typeLabel} #${claim.claim_number}`
+  return typeLabel
+}
 
 function resolveChildLabel(claim) {
   const ai = claim.calculation_inputs || {}
@@ -260,7 +280,16 @@ function GroupCard({ groupEntry, session, activeFY }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
           <span style={{ color: '#4b5563', fontSize: '0.7rem', flexShrink: 0 }}>{collapsed ? '▶' : '▼'}</span>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#f9fafb', marginBottom: '3px' }}>{group.label}</div>
+            {/* Line 1 — "[Claim Type] #[Number]" */}
+            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#f9fafb', marginBottom: '3px' }}>{groupHeaderTitle(group)}</div>
+            {/* Line 2 — "[Shift] · Platoon [X] · [Date]" */}
+            <ShiftPlatoonLine
+              shift={resolveGroupShift(groupEntry)}
+              platoon={resolveGroupPlatoon(groupEntry)}
+              date={group.incident_date}
+              style={{ marginBottom: '2px' }}
+            />
+            {/* Line 3 — existing summary metadata */}
             <div style={{ fontSize: '0.72rem', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
               <span>{children.length} item{children.length !== 1 ? 's' : ''}</span>
               <span>·</span>
@@ -317,10 +346,19 @@ function UngroupedCard({ claim, onEdit, session, activeFY }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '12px 16px', borderRadius: '10px', border: overdue ? '1px solid rgba(239,68,68,0.5)' : '1px solid #2a2a2a', background: overdue ? 'rgba(251,191,36,0.03)' : '#111', marginBottom: '8px', gap: '8px' }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginBottom: '2px' }}>
-          {formatDateDDMMYY(claim.date)} · {CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType}
-          {overdue && <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700 }}>🚩 Overdue</span>}
+        {/* Line 1 — "[Claim Type] #[Number]" */}
+        <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f9fafb', marginBottom: '2px' }}>
+          {claimHeaderTitle(claim)}
+          {overdue && <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700, fontSize: '0.72rem' }}>🚩 Overdue</span>}
         </div>
+        {/* Line 2 — "[Shift] · Platoon [X] · [Date]" */}
+        <ShiftPlatoonLine
+          shift={resolveClaimShift(claim)}
+          platoon={resolveClaimPlatoon(claim)}
+          date={claim.date}
+          style={{ marginBottom: '3px' }}
+        />
+        {/* Line 3 — amount */}
         <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f9fafb', fontVariantNumeric: 'tabular-nums' }}>${amt.toFixed(2)}</div>
         {(claim.payslip_pay_nbr || claim.payment_method) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>

@@ -26,6 +26,12 @@ import { useState } from 'react'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import {
+  resolveClaimShift,
+  resolveClaimPlatoon,
+  resolveGroupShift,
+  resolveGroupPlatoon,
+} from '@/lib/claims/claimMeta'
+import {
   resolveEffectiveAmount,
   isAmountAdjusted,
   isClaimOverdue,
@@ -37,8 +43,25 @@ import {
   sortGroupedEntries,
   sortUngroupedClaims,
 } from '@/lib/reconciliation/filterUtils'
+import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
+
+// ─── Card header title ─────────────────────────────────────────────────────────
+// Line 1 of a claim card: "[Claim Type] #[Number]". Falls back to the persisted
+// group label (which already embeds the number) when the claim number is absent.
+
+function groupHeaderTitle(group) {
+  const typeLabel = CLAIM_TYPE_LABELS[group?.claim_type] || group?.claim_type || 'Claim'
+  if (group?.claim_number != null) return `${typeLabel} #${group.claim_number}`
+  return group?.label || typeLabel
+}
+
+function claimHeaderTitle(claim) {
+  const typeLabel = CLAIM_TYPE_LABELS[claim?.claimType] || claim?.claimType || 'Claim'
+  if (claim?.claim_number != null) return `${typeLabel} #${claim.claim_number}`
+  return typeLabel
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -478,6 +501,7 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
             ▼
           </span>
           <div style={{ minWidth: 0 }}>
+            {/* Line 1 — "[Claim Type] #[Number]" */}
             <div style={{
               fontSize: '0.92rem',
               fontWeight: 700,
@@ -487,8 +511,16 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}>
-              {group.label}
+              {groupHeaderTitle(group)}
             </div>
+            {/* Line 2 — "[Shift] · Platoon [X] · [Date]" */}
+            <ShiftPlatoonLine
+              shift={resolveGroupShift(groupEntry)}
+              platoon={resolveGroupPlatoon(groupEntry)}
+              date={group.incident_date}
+              style={{ marginBottom: '2px' }}
+            />
+            {/* Line 3 — existing summary metadata */}
             <div style={{
               fontSize: '0.71rem',
               color: '#6b7280',
@@ -497,10 +529,6 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
               gap: '5px',
               flexWrap: 'wrap',
             }}>
-              {group.incident_date && (
-                <span>{formatDateDDMMYY(group.incident_date)}</span>
-              )}
-              {group.incident_date && <span>·</span>}
               <span>{children.length} item{children.length !== 1 ? 's' : ''}</span>
               <span>·</span>
               <span style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -645,16 +673,23 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
     }}>
       {/* Left */}
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: '0.77rem', color: '#9ca3af', marginBottom: '2px' }}>
-          {formatDateDDMMYY(claim.date)}
-          {' · '}
-          {CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType}
+        {/* Line 1 — "[Claim Type] #[Number]" */}
+        <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f9fafb', marginBottom: '2px' }}>
+          {claimHeaderTitle(claim)}
           {overdue && (
-            <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700 }}>
+            <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700, fontSize: '0.72rem' }}>
               🚩 Overdue
             </span>
           )}
         </div>
+        {/* Line 2 — "[Shift] · Platoon [X] · [Date]" */}
+        <ShiftPlatoonLine
+          shift={resolveClaimShift(claim)}
+          platoon={resolveClaimPlatoon(claim)}
+          date={claim.date}
+          style={{ marginBottom: '3px' }}
+        />
+        {/* Line 3 — amount */}
         <div style={{
           fontSize: '1rem',
           fontWeight: 700,
@@ -771,6 +806,9 @@ export default function ExpandableClaimList({
   paymentMethodFilter,
   paymentDateFrom,
   paymentDateTo,
+  shiftFilter = 'all',
+  platoonFilter = 'all',
+  searchText = '',
   onEdit,
   session,
   activeFY,
@@ -830,6 +868,9 @@ export default function ExpandableClaimList({
     paymentStatus:   paymentStatusFilter,
     paymentMethod:   paymentMethodFilter || 'all',
     claimType:       filterType || 'all',
+    shift:           shiftFilter || 'all',
+    platoon:         platoonFilter || 'all',
+    search:          searchText || '',
     paymentDateFrom: paymentDateFrom || null,
     paymentDateTo:   paymentDateTo   || null,
     claimDateFrom:   null,

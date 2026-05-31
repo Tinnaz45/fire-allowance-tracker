@@ -21,6 +21,7 @@
 
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { resolveEffectiveAmount, formatDateDDMMYY } from '@/lib/calculations/engine'
+import { roundUpKm } from '@/lib/distance/travelFormat'
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
@@ -232,7 +233,7 @@ function ClaimDetails({ claimType, claim }) {
     }
     if (claim.dist_home_km != null || claim.dist_stn_km != null) {
       const totalKm = (Number(claim.dist_home_km) || 0) + (Number(claim.dist_stn_km) || 0)
-      if (totalKm > 0) lines.push({ label: 'Distance', value: `${totalKm} km` })
+      if (totalKm > 0) lines.push({ label: 'Distance', value: `${roundUpKm(totalKm)} km` })
     }
   }
 
@@ -263,7 +264,7 @@ function ClaimDetails({ claimType, claim }) {
       lines.push({ label: 'Shift', value: claim.shift })
     }
     if (claim.dist_km != null && Number(claim.dist_km) > 0) {
-      lines.push({ label: 'Distance', value: `${Number(claim.dist_km)} km` })
+      lines.push({ label: 'Distance', value: `${roundUpKm(Number(claim.dist_km))} km` })
     }
   }
 

@@ -14,6 +14,7 @@ import {
 import { composeStationLabel } from '@/lib/distance/stationParser'
 import AddressAutocomplete from '@/components/profile/AddressAutocomplete'
 import PlatoonPicker from '@/components/profile/PlatoonPicker'
+import TravelBaselineCard from '@/components/profile/TravelBaselineCard'
 
 const S = {
   inner: { maxWidth: '560px', margin: '0 auto', padding: '32px 16px', boxSizing: 'border-box' },
@@ -388,6 +389,13 @@ export default function ProfilePage() {
               Recall claims auto-estimate the home-to-station distance using OpenStreetMap. Picking a verified address here speeds up that calculation and avoids re-geocoding. You can still accept, override, or recalculate on each claim.
             </div>
           </div>
+
+          <TravelBaselineCard
+            userId={session.user.id}
+            station={stationId ? { id: parseInt(stationId), name: stationName } : null}
+            homeAddress={homeAddress}
+            profileLoading={false}
+          />
 
           <button type="submit" disabled={saving} style={{ ...S.saveBtn, background: saving ? '#7f1d1d' : '#dc2626', cursor: saving ? 'not-allowed' : 'pointer' }}>
             {saving ? 'Saving…' : 'Save Profile'}

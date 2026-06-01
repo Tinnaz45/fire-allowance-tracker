@@ -13,6 +13,8 @@ import {
   formatTravelDistanceKm,
   roundUpMinutes,
   formatTravelTime,
+  roundUpToQuarterHour,
+  formatTravelTimeWithHours,
 } from '../lib/distance/travelFormat.js'
 
 describe('roundUpKm', () => {
@@ -71,5 +73,34 @@ describe('formatTravelTime', () => {
   test('returns null for invalid input', () => {
     expect(formatTravelTime(0)).toBeNull()
     expect(formatTravelTime(null)).toBeNull()
+  })
+})
+
+describe('roundUpToQuarterHour', () => {
+  test('rounds whole minutes up to the next 0.25 h (ceil to 15 min)', () => {
+    expect(roundUpToQuarterHour(59)).toBe(1)       // 59 min → 1.00 hr
+    expect(roundUpToQuarterHour(60)).toBe(1)       // exactly 60 min → 1.00 hr
+    expect(roundUpToQuarterHour(61)).toBe(1.25)    // 61 min → 1.25 hr
+    expect(roundUpToQuarterHour(65)).toBe(1.25)    // 65 min → 1.25 hr
+    expect(roundUpToQuarterHour(15)).toBe(0.25)    // exactly one increment
+    expect(roundUpToQuarterHour(1)).toBe(0.25)     // any leftover rounds up
+  })
+  test('returns null for non-positive / invalid input', () => {
+    expect(roundUpToQuarterHour(0)).toBeNull()
+    expect(roundUpToQuarterHour(null)).toBeNull()
+    expect(roundUpToQuarterHour(NaN)).toBeNull()
+  })
+})
+
+describe('formatTravelTimeWithHours', () => {
+  test('appends quarter-hour-rounded hours to the minute display', () => {
+    expect(formatTravelTimeWithHours(3540)).toBe('59 min (1.00 hr)')   // 59 min
+    expect(formatTravelTimeWithHours(1381)).toBe('24 min (0.50 hr)')   // 24 min
+    expect(formatTravelTimeWithHours(3600)).toBe('1 hr (1.00 hr)')     // exactly 60 min
+    expect(formatTravelTimeWithHours(3900)).toBe('1 hr 5 min (1.25 hr)') // 65 min
+  })
+  test('returns null for invalid input', () => {
+    expect(formatTravelTimeWithHours(0)).toBeNull()
+    expect(formatTravelTimeWithHours(null)).toBeNull()
   })
 })

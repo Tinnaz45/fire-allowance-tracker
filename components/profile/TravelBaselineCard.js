@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { resolveTravelBaseline } from '@/lib/distance/distanceEstimator'
 import { normaliseAddress } from '@/lib/distance/addressCache'
-import { formatTravelDistanceKm, formatTravelTime } from '@/lib/distance/travelFormat'
+import { formatTravelDistanceKm, formatTravelTimeWithHours } from '@/lib/distance/travelFormat'
 
 const S = {
   card: { background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: '16px', padding: '24px', marginBottom: '20px' },
@@ -94,7 +94,7 @@ export default function TravelBaselineCard({ userId, station, homeAddress, profi
   }, [canResolve, userId, station?.id, homeHash])
 
   const distanceText = state === STATE.READY ? formatTravelDistanceKm(result?.km) : null
-  const timeText     = state === STATE.READY ? formatTravelTime(result?.durationSeconds) : null
+  const timeText     = state === STATE.READY ? formatTravelTimeWithHours(result?.durationSeconds) : null
 
   return (
     <div style={S.card}>

@@ -19,8 +19,11 @@ import StationDistanceField from '@/components/distance/StationDistanceField'
 import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField'
 import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
 import ShiftPicker from '@/components/claims/ShiftPicker'
+import PlatoonBanner from '@/components/claims/PlatoonBanner'
+import PlatoonPicker from '@/components/profile/PlatoonPicker'
 import StationPicker from '@/components/claims/StationPicker'
 import TimeInput24 from '@/components/claims/TimeInput24'
+import { resolveOperationalPlatoon } from '@/lib/platoon/resolveOperationalPlatoon'
 import {
   composeStationLabel,
   getExplicitlyResolvedStation,
@@ -71,6 +74,69 @@ const LABEL_STYLE = {
 
 const FIELD = { marginBottom: '16px' }
 const HELP_STYLE = { marginTop: '4px', fontSize: '0.74rem', color: '#6b7280' }
+
+// ─── Shared operational-context fields ────────────────────────────────────────
+// Single source of truth for the rostered-station capture UX (profile autofill,
+// "From Profile"/"Custom" badge + Change workflow — all provided by
+// StationPicker) shared across Recall, Standby and M&D so the three forms can
+// never drift apart. Recall pioneered this pattern; Standby + M&D now reuse it
+// verbatim.
+
+function RosteredStationField({ id, value, onChange, stations, profile, help }) {
+  return (
+    <div style={FIELD}>
+      <label style={LABEL_STYLE} htmlFor={id}>Rostered Station</label>
+      <StationPicker
+        id={id}
+        value={value || ''}
+        onChange={onChange}
+        stations={stations}
+        placeholder={profile?.stationLabel || 'Search by FS number or name (e.g. 45 or Brooklyn)'}
+        ariaLabel="Rostered station"
+        profileLabel={profile?.stationLabel || ''}
+      />
+      <p style={HELP_STYLE}>{help || 'Auto-filled from your profile. Edit if different for this claim.'}</p>
+    </div>
+  )
+}
+
+// Generic operational station picker (no profile default). Used by the meal
+// claims to capture where the meal event occurred.
+function OperationalStationField({ id, label, value, onChange, stations, help }) {
+  return (
+    <div style={FIELD}>
+      <label style={LABEL_STYLE} htmlFor={id}>{label}</label>
+      <StationPicker
+        id={id}
+        value={value || ''}
+        onChange={onChange}
+        stations={stations}
+        placeholder="Search by FS number or name (e.g. 43 or Deer Park)"
+        ariaLabel={label}
+      />
+      {help && <p style={HELP_STYLE}>{help}</p>}
+    </div>
+  )
+}
+
+// Platoon capture for the meal claims. Defaults to the deterministic FRV
+// platoon auto-resolved from date + shift (the canonical source of truth) so
+// behaviour matches every other claim type unless the user explicitly overrides
+// it. An empty stored value means "use the auto-resolved platoon" — the same
+// value the auto-stamp in ClaimsContext would assign.
+function MealPlatoonField({ value, onChange, date, shift }) {
+  const autoPlatoon = resolveOperationalPlatoon(date, shift)
+  const effective = value || autoPlatoon || ''
+  return (
+    <div style={FIELD}>
+      <label style={LABEL_STYLE}>Platoon</label>
+      <PlatoonPicker value={effective} onChange={onChange} idPrefix="meal-platoon" />
+      <p style={HELP_STYLE}>
+        Auto-resolved from date + shift{autoPlatoon ? ` (Platoon ${autoPlatoon})` : ''}. Override if different for this meal.
+      </p>
+    </div>
+  )
+}
 
 // ─── Show Calculation Panel ───────────────────────────────────────────────────
 
@@ -197,9 +263,7 @@ function AdjustedAmountField({ calculatedAmount, adjustedAmount, onChange }) {
 
 // ─── Sub-form: Recall ─────────────────────────────────────────────────────────
 
-function RecallInputs({ values, onChange, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta, entitlement }) {
-  const rosterLabel = profile?.stationLabel || ''
-
+function RecallInputs({ values, onChange, date, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta, entitlement }) {
   // Station resolution is gated on EXPLICIT selection only — typing a fuzzy
   // fragment like "43" must not be treated as a confirmed pick. Downstream
   // Google KM / FRV-matrix lookups all read from these gated values.
@@ -224,19 +288,14 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
 
   return (
     <>
-      <div style={FIELD}>
-        <label style={LABEL_STYLE} htmlFor="recall-rostered-station-input">Rostered Station</label>
-        <StationPicker
-          id="recall-rostered-station-input"
-          value={values.rosteredStn || ''}
-          onChange={(text) => onChange('rosteredStn', text)}
-          stations={stations}
-          placeholder={rosterLabel || 'Search by FS number or name (e.g. 45 or Brooklyn)'}
-          ariaLabel="Rostered station"
-          profileLabel={profile?.stationLabel || ''}
-        />
-        <p style={HELP_STYLE}>Auto-filled from your profile. Edit if different for this recall.</p>
-      </div>
+      <RosteredStationField
+        id="recall-rostered-station-input"
+        value={values.rosteredStn}
+        onChange={(text) => onChange('rosteredStn', text)}
+        stations={stations}
+        profile={profile}
+        help="Auto-filled from your profile. Edit if different for this recall."
+      />
 
       <div style={FIELD}>
         <label style={LABEL_STYLE} htmlFor="recall-recall-station-input">Recall Station</label>
@@ -283,6 +342,10 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
           <option value="Night">Night Shift</option>
         </select>
         <p style={HELP_STYLE}>Required. Drives meal entitlement and standard-shift boundary.</p>
+
+        <div style={{ marginTop: 10 }}>
+          <PlatoonBanner date={date} shift={values.shift} />
+        </div>
 
         <label style={{
           display: 'flex', alignItems: 'center', gap: 8,
@@ -383,7 +446,7 @@ function RecallInputs({ values, onChange, profile, profileLoading, userId, stati
 
 // ─── Sub-form: Retain ─────────────────────────────────────────────────────────
 
-function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
+function RetainInputs({ values, onChange, date, mealEligibility, retainBreakdown }) {
   const eligTier = mealEligibility?.tier || 'none'
   const eligColor = eligTier === 'none' ? '#9ca3af' : '#4ade80'
   const eligBg    = eligTier === 'none' ? 'rgba(107,114,128,0.08)' : 'rgba(34,197,94,0.08)'
@@ -416,6 +479,9 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
           {' '}{values.shift === 'Night' ? '09:00' : '19:00'} · flat-end
           {' '}{values.shift === 'Night' ? '12:00' : '22:00'}.
         </p>
+        <div style={{ marginTop: 10 }}>
+          <PlatoonBanner date={date} shift={values.shift} />
+        </div>
       </div>
 
       <div style={FIELD}>
@@ -503,20 +569,25 @@ function RetainInputs({ values, onChange, mealEligibility, retainBreakdown }) {
 
 // ─── Sub-form: Standby ────────────────────────────────────────────────────────
 
-function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, stations, onStandbyMeta }) {
-  // Resolve rostered + standby stations from the profile / typed text. Mirrors
-  // the Recall flow so the user gets the same chip feedback + auto-distance UX.
-  const rosterStation = (() => {
-    if (profile?.stationId) {
-      return {
+function StandbyInputs({ values, onChange, date, nightMealEligible, profile, userId, stations, onStandbyMeta }) {
+  // Rostered station now mirrors the Recall capture UX exactly: an editable
+  // StationPicker pre-filled from the profile (with the From Profile / Custom
+  // badge + Change workflow), gated to explicit selection. The resolved value
+  // feeds the auto-distance origin; an explicit pick wins, otherwise we fall
+  // back to the profile so the lookup still runs when the user leaves it as-is.
+  const explicitRosterStation = getExplicitlyResolvedStation(values.rosteredStn, stations)
+
+  const profileFallbackStation = profile?.stationId
+    ? {
         id:           profile.stationId,
         name:         profile.stationName || null,
         abbreviation: `FS${profile.stationId}`,
         label:        profile.stationLabel || `FS${profile.stationId}`,
       }
-    }
-    return null
-  })()
+    : null
+
+  const rosterStationForLookup = explicitRosterStation || profileFallbackStation
+
   // Only treat the standby station as resolved once the user has explicitly
   // picked an option from the picker (value === canonical label). The
   // picker never writes raw keystrokes to `value`, so a fuzzy fragment
@@ -528,6 +599,15 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
 
   return (
     <>
+      <RosteredStationField
+        id="standby-rostered-station-input"
+        value={values.rosteredStn}
+        onChange={(text) => onChange('rosteredStn', text)}
+        stations={stations}
+        profile={profile}
+        help={`Auto-filled from your profile. Edit if different for this ${isMD ? 'muster & dismiss' : 'standby'}.`}
+      />
+
       <div style={FIELD}>
         <label style={LABEL_STYLE} htmlFor="standby-station-input">{isMD ? 'M&D Station' : 'Standby Station'}</label>
         <StationPicker
@@ -538,12 +618,15 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
           placeholder="Search by FS number or name (e.g. 43 or Deer Park)"
           ariaLabel={isMD ? 'M&D station' : 'Standby station'}
         />
-        <p style={HELP_STYLE}>Used for Google KM + FRV matrix hours lookup. Leave blank to enter km manually.</p>
+        <p style={HELP_STYLE}>
+          {isMD ? 'Event/destination station. ' : 'Destination station. '}
+          Used for Google KM + FRV matrix hours lookup. Leave blank to enter km manually.
+        </p>
       </div>
 
       <StandbyDistanceField
         userId={userId}
-        rosterStation={rosterStation}
+        rosterStation={rosterStationForLookup}
         standbyStation={standbyStation}
         value={values.distKm}
         onChange={(km) => onChange('distKm', km)}
@@ -556,6 +639,9 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
           value={values.shift}
           onChange={(v) => onChange('shift', v)}
         />
+        <div style={{ marginTop: 10 }}>
+          <PlatoonBanner date={date} shift={values.shift} />
+        </div>
       </div>
 
       {/* Arrival time is required for both Day and Night standby (Standby
@@ -610,7 +696,7 @@ function StandbyInputs({ values, onChange, nightMealEligible, profile, userId, s
 // When 'delayed_meal', the Meal Type selector is hidden — meal_type is forced to
 // 'Delayed' by the virtual claimType resolution in ClaimsContext/addClaim.
 
-function SpoiltInputs({ values, onChange, claimType }) {
+function SpoiltInputs({ values, onChange, date, claimType, stations }) {
   const mealWin = getMealWindow(values.shift)
   const incidentStatus = values.incidentTime
     ? checkTimeInMealWindow(values.incidentTime, values.shift)
@@ -624,6 +710,15 @@ function SpoiltInputs({ values, onChange, claimType }) {
 
   return (
     <>
+      <OperationalStationField
+        id="meal-operational-station-input"
+        label="Operational Station"
+        value={values.operationalStn}
+        onChange={(text) => onChange('operationalStn', text)}
+        stations={stations}
+        help="Station where the meal event occurred. Captured for reconciliation — does not affect the amount."
+      />
+
       {/* Only show Meal Type selector for 'spoilt' — for 'delayed_meal' it is forced */}
       {claimType !== 'delayed_meal' && (
       <div style={FIELD}>
@@ -654,6 +749,13 @@ function SpoiltInputs({ values, onChange, claimType }) {
         </div>
       </div>
 
+      <MealPlatoonField
+        value={values.platoon}
+        onChange={(p) => onChange('platoon', p)}
+        date={date}
+        shift={values.shift}
+      />
+
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Incident Time (optional)</label>
         <TimeInput24
@@ -678,10 +780,10 @@ function SpoiltInputs({ values, onChange, claimType }) {
 const DEFAULTS = {
   recalls:      { rosteredStn: '', recallStn: '', distHomeKm: '', distStnKm: '', arrivalTime: '', shift: '', notified: false },
   retain:       { shift: 'Day', bookedOffTime: '' },
-  standby:      { standbyType: 'Standby', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
-  md:           { standbyType: 'M&D',     standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
-  spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '' },
-  delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '' },
+  standby:      { standbyType: 'Standby', rosteredStn: '', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
+  md:           { standbyType: 'M&D',     rosteredStn: '', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
+  spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', operationalStn: '', platoon: '' },
+  delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', operationalStn: '', platoon: '' },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -800,6 +902,12 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     if (claimType === 'recalls' && profile?.stationLabel) {
       defaults.rosteredStn = profile.stationLabel
       defaults.distHomeKm  = profile.homeDistKm ? String(profile.homeDistKm) : ''
+    }
+    // Standby + M&D reuse the Recall rostered-station pattern: pre-fill the
+    // rostered station from the profile so the From Profile badge shows and the
+    // auto-distance origin is ready without forcing the user to re-pick it.
+    if ((claimType === 'standby' || claimType === 'md') && profile?.stationLabel) {
+      defaults.rosteredStn = profile.stationLabel
     }
     setFields(defaults)
     setBreakdown(null)
@@ -1037,18 +1145,19 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
       </div>
 
-      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} entitlement={recallEntitlement} />}
+      {claimType === 'recalls'      && <RecallInputs values={fields} onChange={handleFieldChange} date={date} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onHomeLegMeta={setRecallHomeMeta} onStnLegMeta={setRecallStnMeta} entitlement={recallEntitlement} />}
       {claimType === 'retain'       && (
         <RetainInputs
           values={fields}
           onChange={handleFieldChange}
+          date={date}
           mealEligibility={calcRetainMealEligibility({ shift: fields.shift, bookedOffTime: fields.bookedOffTime })}
           retainBreakdown={breakdown}
         />
       )}
-      {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
+      {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} date={date} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
       {(claimType === 'spoilt' || claimType === 'delayed_meal') && (
-        <SpoiltInputs values={fields} onChange={handleFieldChange} claimType={claimType} />
+        <SpoiltInputs values={fields} onChange={handleFieldChange} date={date} claimType={claimType} stations={stations} />
       )}
 
       {showCalcLines && (

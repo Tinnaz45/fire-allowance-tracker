@@ -14,6 +14,8 @@ import {
 import { composeStationLabel } from '@/lib/distance/stationParser'
 import AddressAutocomplete from '@/components/profile/AddressAutocomplete'
 import PlatoonPicker from '@/components/profile/PlatoonPicker'
+import TravelBaselineCard from '@/components/profile/TravelBaselineCard'
+import { roundUpKm } from '@/lib/distance/travelFormat'
 
 const S = {
   inner: { maxWidth: '560px', margin: '0 auto', padding: '32px 16px', boxSizing: 'border-box' },
@@ -244,7 +246,6 @@ export default function ProfilePage() {
 
   const activeStationLabel = composeStationLabel(stationId, stationName) || null
   const validDistance = activeStationLabel && typeof homeDistKm === 'number' && Number.isFinite(homeDistKm) && homeDistKm > 0 ? homeDistKm : null
-  const fmtKm = (n) => (n % 1 === 0 ? n.toFixed(0) : n.toFixed(1))
 
   return (
     <AppShell>
@@ -286,7 +287,7 @@ export default function ProfilePage() {
                   {activeStationLabel}
                   {validDistance && (
                     <span style={{ marginLeft: '6px', fontWeight: 500, color: 'rgba(252,165,165,0.65)' }}>
-                      ({fmtKm(validDistance)} km / {fmtKm(validDistance * 2)} km)
+                      ({roundUpKm(validDistance)} km / {roundUpKm(validDistance * 2)} km)
                     </span>
                   )}
                 </div>
@@ -388,6 +389,13 @@ export default function ProfilePage() {
               Recall claims auto-estimate the home-to-station distance using OpenStreetMap. Picking a verified address here speeds up that calculation and avoids re-geocoding. You can still accept, override, or recalculate on each claim.
             </div>
           </div>
+
+          <TravelBaselineCard
+            userId={session.user.id}
+            station={stationId ? { id: parseInt(stationId), name: stationName } : null}
+            homeAddress={homeAddress}
+            profileLoading={false}
+          />
 
           <button type="submit" disabled={saving} style={{ ...S.saveBtn, background: saving ? '#7f1d1d' : '#dc2626', cursor: saving ? 'not-allowed' : 'pointer' }}>
             {saving ? 'Saving…' : 'Save Profile'}

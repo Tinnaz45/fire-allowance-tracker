@@ -26,6 +26,14 @@ import { useState } from 'react'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import {
+  resolveClaimShift,
+  resolveClaimPlatoon,
+  resolveGroupShift,
+  resolveGroupPlatoon,
+  resolveClaimStations,
+  resolveGroupStations,
+} from '@/lib/claims/claimMeta'
+import {
   resolveEffectiveAmount,
   isAmountAdjusted,
   isClaimOverdue,
@@ -37,8 +45,27 @@ import {
   sortGroupedEntries,
   sortUngroupedClaims,
 } from '@/lib/reconciliation/filterUtils'
+import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
+import StationContextLine from '@/components/claims/StationContextLine'
+import PaymentProgressBadge from '@/components/claims/PaymentProgressBadge'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
+
+// ─── Card header title ─────────────────────────────────────────────────────────
+// Line 1 of a claim card: "[Claim Type] #[Number]". Falls back to the persisted
+// group label (which already embeds the number) when the claim number is absent.
+
+function groupHeaderTitle(group) {
+  const typeLabel = CLAIM_TYPE_LABELS[group?.claim_type] || group?.claim_type || 'Claim'
+  if (group?.claim_number != null) return `${typeLabel} #${group.claim_number}`
+  return group?.label || typeLabel
+}
+
+function claimHeaderTitle(claim) {
+  const typeLabel = CLAIM_TYPE_LABELS[claim?.claimType] || claim?.claimType || 'Claim'
+  if (claim?.claim_number != null) return `${typeLabel} #${claim.claim_number}`
+  return typeLabel
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -170,32 +197,8 @@ function PaymentMethodBadge({ method }) {
   )
 }
 
-// ─── ProgressPill ─────────────────────────────────────────────────────────────
-// Shows "2/3 paid" progress for a parent claim group.
-
-function ProgressPill({ paid, total }) {
-  if (total === 0) return null
-  const allPaid  = paid === total
-  const partial  = paid > 0 && paid < total
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px',
-      padding: '2px 8px',
-      borderRadius: '5px',
-      fontSize: '0.66rem',
-      fontWeight: 700,
-      letterSpacing: '0.02em',
-      flexShrink: 0,
-      background: allPaid ? 'rgba(34,197,94,0.12)' : partial ? 'rgba(99,102,241,0.1)' : 'rgba(234,179,8,0.08)',
-      border:     allPaid ? '1px solid rgba(34,197,94,0.35)' : partial ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(234,179,8,0.25)',
-      color:      allPaid ? '#86efac' : partial ? '#a5b4fc' : '#fde68a',
-    }}>
-      {paid}/{total} paid
-    </span>
-  )
-}
+// Payment progress is now shown via the shared <PaymentProgressBadge> (single,
+// deliberately understated badge: "Outstanding • 0/2" / "Part Paid • 1/2" / "Paid").
 
 // ─── QuickPayToggle ────────────────────────────────────────────────────────────
 // One-click "Mark Paid" per unpaid sub-claim. Updates payment_status + payment_date.
@@ -478,6 +481,7 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
             ▼
           </span>
           <div style={{ minWidth: 0 }}>
+            {/* Line 1 — "[Claim Type] #[Number]" */}
             <div style={{
               fontSize: '0.92rem',
               fontWeight: 700,
@@ -487,26 +491,38 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}>
-              {group.label}
+              {groupHeaderTitle(group)}
             </div>
+            {/* Line 2 — claim value (primary scannable figure) + item count */}
             <div style={{
-              fontSize: '0.71rem',
-              color: '#6b7280',
               display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
+              alignItems: 'baseline',
+              gap: '8px',
               flexWrap: 'wrap',
+              marginBottom: '5px',
             }}>
-              {group.incident_date && (
-                <span>{formatDateDDMMYY(group.incident_date)}</span>
-              )}
-              {group.incident_date && <span>·</span>}
-              <span>{children.length} item{children.length !== 1 ? 's' : ''}</span>
-              <span>·</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                <strong style={{ color: '#e5e7eb' }}>${totalAmt.toFixed(2)}</strong>
+              <span style={{
+                fontSize: '1.2rem',
+                fontWeight: 600,
+                color: '#f3f4f6',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
+                lineHeight: 1.1,
+              }}>
+                ${totalAmt.toFixed(2)}
+              </span>
+              <span style={{ fontSize: '0.71rem', color: '#6b7280' }}>
+                {children.length} item{children.length !== 1 ? 's' : ''}
               </span>
             </div>
+            {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
+            <ShiftPlatoonLine
+              shift={resolveGroupShift(groupEntry)}
+              platoon={resolveGroupPlatoon(groupEntry)}
+              date={group.incident_date}
+            />
+            {/* Line 4 — captured station context (omitted when none) */}
+            <StationContextLine stations={resolveGroupStations(groupEntry)} />
           </div>
         </div>
 
@@ -535,12 +551,9 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
               🚩 Overdue
             </span>
           )}
-          {/* Progress pill: always from payment_status canonical source */}
-          {totalCount > 0 && (
-            <ProgressPill paid={paidCount} total={totalCount} />
-          )}
-          {/* Status badge: shows derivedPaymentStatus (canonical), not DB parent_status */}
-          <StatusBadge status={derivedPaymentStatus} />
+          {/* Single payment-progress badge — status word + count in one chip.
+              Canonical: paidCount/totalCount from payment_status (ClaimsContext). */}
+          <PaymentProgressBadge paidCount={paidCount} totalCount={totalCount} />
         </div>
       </div>
 
@@ -645,21 +658,24 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
     }}>
       {/* Left */}
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: '0.77rem', color: '#9ca3af', marginBottom: '2px' }}>
-          {formatDateDDMMYY(claim.date)}
-          {' · '}
-          {CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType}
+        {/* Line 1 — "[Claim Type] #[Number]" */}
+        <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f9fafb', marginBottom: '2px' }}>
+          {claimHeaderTitle(claim)}
           {overdue && (
-            <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700 }}>
+            <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700, fontSize: '0.72rem' }}>
               🚩 Overdue
             </span>
           )}
         </div>
+        {/* Line 2 — amount (primary scannable figure) */}
         <div style={{
-          fontSize: '1rem',
-          fontWeight: 700,
-          color: '#f9fafb',
+          fontSize: '1.2rem',
+          fontWeight: 600,
+          color: '#f3f4f6',
           fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '-0.01em',
+          lineHeight: 1.1,
+          marginBottom: '5px',
         }}>
           ${amt.toFixed(2)}
           {adjusted && (
@@ -668,8 +684,16 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
             </span>
           )}
         </div>
+        {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
+        <ShiftPlatoonLine
+          shift={resolveClaimShift(claim)}
+          platoon={resolveClaimPlatoon(claim)}
+          date={claim.date}
+        />
+        {/* Line 4 — captured station context (omitted when none) */}
+        <StationContextLine stations={resolveClaimStations(claim)} />
         {(claim.payslip_pay_nbr || claim.payment_method) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
             {claim.payslip_pay_nbr && (
               <span style={{ fontSize: '0.69rem', color: '#6b7280' }}>
                 Pay #{claim.payslip_pay_nbr}
@@ -688,11 +712,14 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
         gap: '6px',
         flexShrink: 0,
       }}>
-        {/* FlatClaimCard = ungrouped/legacy claims only.
-            payment_status badge if set; otherwise status badge (these rows
-            predate multi-component architecture and have no payment_status). */}
+        {/* FlatClaimCard = ungrouped/legacy claims only. Single-component, so the
+            shared progress badge renders as a plain "Paid"/"Pending" (count
+            dropped). Truly legacy rows (no payment_status) keep the status badge. */}
         {claim.payment_status != null
-          ? <PaymentStatusBadge paymentStatus={claim.payment_status} />
+          ? <PaymentProgressBadge
+              paidCount={(claim.payment_status || '').toLowerCase() === 'paid' ? 1 : 0}
+              totalCount={1}
+            />
           : <StatusBadge status={claim.status} />
         }
         <div style={{ display: 'flex', gap: '6px' }}>
@@ -771,6 +798,9 @@ export default function ExpandableClaimList({
   paymentMethodFilter,
   paymentDateFrom,
   paymentDateTo,
+  shiftFilter = 'all',
+  platoonFilter = 'all',
+  searchText = '',
   onEdit,
   session,
   activeFY,
@@ -830,6 +860,9 @@ export default function ExpandableClaimList({
     paymentStatus:   paymentStatusFilter,
     paymentMethod:   paymentMethodFilter || 'all',
     claimType:       filterType || 'all',
+    shift:           shiftFilter || 'all',
+    platoon:         platoonFilter || 'all',
+    search:          searchText || '',
     paymentDateFrom: paymentDateFrom || null,
     paymentDateTo:   paymentDateTo   || null,
     claimDateFrom:   null,

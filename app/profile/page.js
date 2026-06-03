@@ -177,6 +177,14 @@ export default function ProfilePage() {
         email: session.user.email,
         first_name: firstName.trim(),
         last_name: lastName.trim(),
+        // Canonical rostered station. The entitlement engine
+        // (lib/fat/engine/context.js § buildEngineContext) reads
+        // fat.profiles.rostered_station_id to resolve the excess-travel "from"
+        // station; without it, excess-travel generation is suppressed. Kept in
+        // lockstep with the prototype profile_ext.station_id written below so
+        // both paths agree. Affects future claims only — historical claims keep
+        // their own station_id_snapshot.
+        rostered_station_id: stationId ? parseInt(stationId) : null,
       }, { onConflict: 'id' })
       if (profileError) throw profileError
 

@@ -26,6 +26,14 @@ import { useState } from 'react'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import {
+  resolveClaimShift,
+  resolveClaimPlatoon,
+  resolveGroupShift,
+  resolveGroupPlatoon,
+  resolveClaimStations,
+  resolveGroupStations,
+} from '@/lib/claims/claimMeta'
+import {
   resolveEffectiveAmount,
   isAmountAdjusted,
   isClaimOverdue,
@@ -37,8 +45,27 @@ import {
   sortGroupedEntries,
   sortUngroupedClaims,
 } from '@/lib/reconciliation/filterUtils'
+import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
+import StationContextLine from '@/components/claims/StationContextLine'
+import PaymentProgressBadge from '@/components/claims/PaymentProgressBadge'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
+
+// ─── Card header title ─────────────────────────────────────────────────────────
+// Line 1 of a claim card: "[Claim Type] #[Number]". Falls back to the persisted
+// group label (which already embeds the number) when the claim number is absent.
+
+function groupHeaderTitle(group) {
+  const typeLabel = CLAIM_TYPE_LABELS[group?.claim_type] || group?.claim_type || 'Claim'
+  if (group?.claim_number != null) return `${typeLabel} #${group.claim_number}`
+  return group?.label || typeLabel
+}
+
+function claimHeaderTitle(claim) {
+  const typeLabel = CLAIM_TYPE_LABELS[claim?.claimType] || claim?.claimType || 'Claim'
+  if (claim?.claim_number != null) return `${typeLabel} #${claim.claim_number}`
+  return typeLabel
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,6 +91,143 @@ function resolveChildLabel(claim) {
   if (ai.autoChild === 'standby_and_dismi')         return 'Standby&Dismi'
   if (ai.autoChild === 'md_event')                  return 'M&D'
   return CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType
+}
+
+// ─── Payment-stream grouping (display-only) ─────────────────────────────────────
+// Generated entitlements are split into payment streams for scannability. The
+// stream is resolved with a priority cascade so the grouping reflects payment
+// BUSINESS RULES, not just storage state:
+//   1. Persisted payment_method (canonical truth) when present.
+//   2. Generated-entitlement slug (calculation_inputs.autoChild) — the most
+//      reliable signal for prototype rows, which don't carry payment_method.
+//   3. Top-level claimType (parent / single-component rows).
+//   4. Resolved label text — catches equivalents (e.g. "Fire Call") that share
+//      no slug/type with the canonical set.
+// "Unassigned" is reserved for genuinely unknown entitlement types; known types
+// always land under Payslip or Petty Cash even when payment_method is null.
+// This is display-only — payment_method remains a canonical concern, untouched
+// by this routing (see standby_entitlement_split / standby_md_creation memory).
+
+const STREAM = { PAYSLIP: 'payslip', PETTY_CASH: 'petty_cash', UNASSIGNED: 'unassigned' }
+const STREAM_ORDER = [STREAM.PAYSLIP, STREAM.PETTY_CASH, STREAM.UNASSIGNED]
+const STREAM_META = {
+  [STREAM.PAYSLIP]:    { label: 'Payslip Sub-Claims',    icon: '📋', color: '#a5b4fc', bg: 'rgba(99,102,241,0.10)',  border: 'rgba(99,102,241,0.35)' },
+  [STREAM.PETTY_CASH]: { label: 'Petty Cash Sub-Claims', icon: '💵', color: '#fdba74', bg: 'rgba(251,146,60,0.10)',  border: 'rgba(251,146,60,0.35)' },
+  [STREAM.UNASSIGNED]: { label: 'Unassigned',            icon: '○',  color: '#9ca3af', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.30)' },
+}
+
+// Generated-entitlement slug (calculation_inputs.autoChild) → payment stream.
+// Payroll allowances go to Payslip; reimbursements (meals, travel) to Petty Cash.
+const AUTOCHILD_STREAM = {
+  // ── Payslip (payroll) ──
+  callback_ops:            STREAM.PAYSLIP,
+  standby_and_dismi:       STREAM.PAYSLIP,
+  md_event:                STREAM.PAYSLIP,
+  maint_stn_nn:            STREAM.PAYSLIP,
+  // ── Petty Cash (reimbursement) ──
+  excess_travel:           STREAM.PETTY_CASH,
+  standby_travel:          STREAM.PETTY_CASH, // legacy slug
+  standby_excess_travel:   STREAM.PETTY_CASH,
+  petty_cash_meal:         STREAM.PETTY_CASH,
+  petty_cash_travel_night: STREAM.PETTY_CASH, // legacy slug
+  standby_small_meal:      STREAM.PETTY_CASH,
+  retain_meal:             STREAM.PETTY_CASH,
+  overnight_cash:          STREAM.PETTY_CASH,
+}
+
+// Top-level claimType → payment stream (parent / single-component rows that
+// carry no autoChild slug). Operational allowances are paid through payroll;
+// stand-alone meal claims are reimbursed through petty cash.
+const CLAIM_TYPE_STREAM = {
+  recalls:      STREAM.PAYSLIP,
+  retain:       STREAM.PAYSLIP,
+  standby:      STREAM.PAYSLIP,
+  md:           STREAM.PAYSLIP,
+  spoilt:       STREAM.PETTY_CASH,
+  delayed_meal: STREAM.PETTY_CASH,
+}
+
+// Last-resort heuristic: derive a stream from the human label so equivalents
+// not covered by a slug/type (e.g. "Fire Call") still route. Returns null when
+// nothing recognisable matches, so the caller can fall through to Unassigned.
+function streamFromLabel(label) {
+  const t = (label ?? '').toString().toLowerCase()
+  if (!t) return null
+  // Reimbursements first — "meal"/"travel" are unambiguous petty-cash signals.
+  if (t.includes('meal') || t.includes('travel') || t.includes('spoilt') || t.includes('overnight')) {
+    return STREAM.PETTY_CASH
+  }
+  if (
+    t.includes('recall') || t.includes('callback') || t.includes('call back') ||
+    t.includes('fire call') || t.includes('firecall') ||
+    t.includes('standby') || t.includes('dismi') || t.includes('muster') ||
+    t.includes('maint')
+  ) {
+    return STREAM.PAYSLIP
+  }
+  return null
+}
+
+// Resolve a sub-claim/entitlement to its display payment stream via a priority
+// cascade (see block comment above). Calculations, generation, persistence and
+// reconciliation are unaffected — this only chooses a display bucket.
+function resolvePaymentStream(claim) {
+  // 1. Persisted payment_method ('Payslip' / 'Petty Cash' / canonical slugs).
+  const raw = (claim?.payment_method ?? '').toString().trim().toLowerCase().replace(/[^a-z]/g, '')
+  if (raw === 'payslip')   return STREAM.PAYSLIP
+  if (raw === 'pettycash') return STREAM.PETTY_CASH
+
+  // 2. Generated-entitlement slug.
+  const autoChild = claim?.calculation_inputs?.autoChild
+  if (autoChild && AUTOCHILD_STREAM[autoChild]) return AUTOCHILD_STREAM[autoChild]
+
+  // 3. Top-level claim type.
+  if (claim?.claimType && CLAIM_TYPE_STREAM[claim.claimType]) return CLAIM_TYPE_STREAM[claim.claimType]
+
+  // 4. Label heuristic (catches equivalents with no slug/type mapping).
+  const fromLabel = streamFromLabel(resolveChildLabel(claim))
+  if (fromLabel) return fromLabel
+
+  // 5. Genuinely unknown — leave Unassigned.
+  return STREAM.UNASSIGNED
+}
+
+// ─── SubClaimGroupHeader ────────────────────────────────────────────────────────
+// Compact payment-stream section label: chip (icon + name + count) + stream subtotal.
+
+function SubClaimGroupHeader({ stream, count, subtotal }) {
+  const meta = STREAM_META[stream] || STREAM_META[STREAM.UNASSIGNED]
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '8px',
+      margin: '10px 0 2px',
+      flexWrap: 'wrap',
+    }}>
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px',
+        padding: '2px 8px',
+        borderRadius: '5px',
+        fontSize: '0.63rem',
+        fontWeight: 700,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        background: meta.bg,
+        border: `1px solid ${meta.border}`,
+        color: meta.color,
+      }}>
+        {meta.icon} {meta.label}
+        <span style={{ opacity: 0.7, fontWeight: 600 }}>· {count}</span>
+      </span>
+      <span style={{ fontSize: '0.72rem', color: '#6b7280', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+        ${subtotal.toFixed(2)}
+      </span>
+    </div>
+  )
 }
 
 // ─── Retain container hiding ───────────────────────────────────────────────────
@@ -170,32 +334,8 @@ function PaymentMethodBadge({ method }) {
   )
 }
 
-// ─── ProgressPill ─────────────────────────────────────────────────────────────
-// Shows "2/3 paid" progress for a parent claim group.
-
-function ProgressPill({ paid, total }) {
-  if (total === 0) return null
-  const allPaid  = paid === total
-  const partial  = paid > 0 && paid < total
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px',
-      padding: '2px 8px',
-      borderRadius: '5px',
-      fontSize: '0.66rem',
-      fontWeight: 700,
-      letterSpacing: '0.02em',
-      flexShrink: 0,
-      background: allPaid ? 'rgba(34,197,94,0.12)' : partial ? 'rgba(99,102,241,0.1)' : 'rgba(234,179,8,0.08)',
-      border:     allPaid ? '1px solid rgba(34,197,94,0.35)' : partial ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(234,179,8,0.25)',
-      color:      allPaid ? '#86efac' : partial ? '#a5b4fc' : '#fde68a',
-    }}>
-      {paid}/{total} paid
-    </span>
-  )
-}
+// Payment progress is now shown via the shared <PaymentProgressBadge> (single,
+// deliberately understated badge: "Outstanding • 0/2" / "Part Paid • 1/2" / "Paid").
 
 // ─── QuickPayToggle ────────────────────────────────────────────────────────────
 // One-click "Mark Paid" per unpaid sub-claim. Updates payment_status + payment_date.
@@ -307,9 +447,12 @@ function SubClaimRow({ claim, session, activeFY, isLast }) {
       padding: '9px 0',
       borderBottom: isLast ? 'none' : '1px solid #1e1e1e',
       gap: '8px',
+      // Wrap on narrow (iPhone-width) screens so the action cluster drops below
+      // the label instead of starving it; stays single-line where there's room.
+      flexWrap: 'wrap',
     }}>
       {/* Left: tree connector + label + method badge */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: 0, flex: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: '150px', flex: '1 1 auto' }}>
         <span style={{
           color: '#374151',
           fontSize: '0.78rem',
@@ -368,6 +511,25 @@ function SubClaimRow({ claim, session, activeFY, isLast }) {
         }}>
           ${amt.toFixed(2)}
         </span>
+        {/* Manual override indicator — amount was edited away from the generated value */}
+        {isAmountAdjusted(claim) && (
+          <span
+            title="Amount manually adjusted"
+            style={{
+              fontSize: '0.62rem',
+              fontWeight: 700,
+              color: '#fbbf24',
+              background: 'rgba(251,191,36,0.12)',
+              border: '1px solid rgba(251,191,36,0.35)',
+              borderRadius: '4px',
+              padding: '1px 5px',
+              letterSpacing: '0.03em',
+              flexShrink: 0,
+            }}
+          >
+            Adj
+          </span>
+        )}
         {/* CANONICAL: always show PaymentStatusBadge from payment_status */}
         <PaymentStatusBadge paymentStatus={claim.payment_status || 'Pending'} />
         <QuickPayToggle claim={claim} session={session} activeFY={activeFY} />
@@ -478,6 +640,7 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
             ▼
           </span>
           <div style={{ minWidth: 0 }}>
+            {/* Line 1 — "[Claim Type] #[Number]" */}
             <div style={{
               fontSize: '0.92rem',
               fontWeight: 700,
@@ -487,26 +650,38 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}>
-              {group.label}
+              {groupHeaderTitle(group)}
             </div>
+            {/* Line 2 — claim value (primary scannable figure) + item count */}
             <div style={{
-              fontSize: '0.71rem',
-              color: '#6b7280',
               display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
+              alignItems: 'baseline',
+              gap: '8px',
               flexWrap: 'wrap',
+              marginBottom: '5px',
             }}>
-              {group.incident_date && (
-                <span>{formatDateDDMMYY(group.incident_date)}</span>
-              )}
-              {group.incident_date && <span>·</span>}
-              <span>{children.length} item{children.length !== 1 ? 's' : ''}</span>
-              <span>·</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                <strong style={{ color: '#e5e7eb' }}>${totalAmt.toFixed(2)}</strong>
+              <span style={{
+                fontSize: '1.2rem',
+                fontWeight: 600,
+                color: '#f3f4f6',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
+                lineHeight: 1.1,
+              }}>
+                ${totalAmt.toFixed(2)}
+              </span>
+              <span style={{ fontSize: '0.71rem', color: '#6b7280' }}>
+                {children.length} item{children.length !== 1 ? 's' : ''}
               </span>
             </div>
+            {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
+            <ShiftPlatoonLine
+              shift={resolveGroupShift(groupEntry)}
+              platoon={resolveGroupPlatoon(groupEntry)}
+              date={group.incident_date}
+            />
+            {/* Line 4 — captured station context (omitted when none) */}
+            <StationContextLine stations={resolveGroupStations(groupEntry)} />
           </div>
         </div>
 
@@ -535,32 +710,61 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
               🚩 Overdue
             </span>
           )}
-          {/* Progress pill: always from payment_status canonical source */}
-          {totalCount > 0 && (
-            <ProgressPill paid={paidCount} total={totalCount} />
-          )}
-          {/* Status badge: shows derivedPaymentStatus (canonical), not DB parent_status */}
-          <StatusBadge status={derivedPaymentStatus} />
+          {/* Single payment-progress badge — status word + count in one chip.
+              Canonical: paidCount/totalCount from payment_status (ClaimsContext). */}
+          <PaymentProgressBadge paidCount={paidCount} totalCount={totalCount} />
         </div>
       </div>
 
       {/* ── Expanded sub-claim body ── */}
       {expanded && (
         <div style={{ padding: '4px 16px 12px 16px', background: '#0f0f0f' }}>
+          {/* Parent operational-claim framing for the generated entitlements below */}
+          <div style={{
+            fontSize: '0.63rem',
+            fontWeight: 700,
+            color: '#4b5563',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            margin: '6px 0 2px',
+          }}>
+            Generated Entitlements
+          </div>
           {children.length === 0 ? (
             <p style={{ fontSize: '0.8rem', color: '#4b5563', margin: '10px 0' }}>
               No payment components on this claim.
             </p>
           ) : (
-            children.map((child, i) => (
-              <SubClaimRow
-                key={`${child.claimType}-${child.id}`}
-                claim={child}
-                session={session}
-                activeFY={activeFY}
-                isLast={i === children.length - 1}
-              />
-            ))
+            // Group entitlements by payment stream (Payslip / Petty Cash / Unassigned).
+            // Each non-empty stream gets a labelled, colour-keyed, indented block so
+            // the operator can tell streams apart without reading entitlement names.
+            STREAM_ORDER.map((stream) => {
+              const rows = children.filter((c) => resolvePaymentStream(c) === stream)
+              if (rows.length === 0) return null
+              const meta = STREAM_META[stream]
+              const subtotal = rows.reduce((s, c) => s + resolveComponentAmount(c), 0)
+              return (
+                <div
+                  key={stream}
+                  style={{
+                    borderLeft: `2px solid ${meta.border}`,
+                    paddingLeft: '10px',
+                    marginBottom: '2px',
+                  }}
+                >
+                  <SubClaimGroupHeader stream={stream} count={rows.length} subtotal={subtotal} />
+                  {rows.map((child, i) => (
+                    <SubClaimRow
+                      key={`${child.claimType}-${child.id}`}
+                      claim={child}
+                      session={session}
+                      activeFY={activeFY}
+                      isLast={i === rows.length - 1}
+                    />
+                  ))}
+                </div>
+              )
+            })
           )}
 
           {/* Edit + Delete buttons in expanded footer */}
@@ -645,21 +849,24 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
     }}>
       {/* Left */}
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: '0.77rem', color: '#9ca3af', marginBottom: '2px' }}>
-          {formatDateDDMMYY(claim.date)}
-          {' · '}
-          {CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType}
+        {/* Line 1 — "[Claim Type] #[Number]" */}
+        <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f9fafb', marginBottom: '2px' }}>
+          {claimHeaderTitle(claim)}
           {overdue && (
-            <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700 }}>
+            <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700, fontSize: '0.72rem' }}>
               🚩 Overdue
             </span>
           )}
         </div>
+        {/* Line 2 — amount (primary scannable figure) */}
         <div style={{
-          fontSize: '1rem',
-          fontWeight: 700,
-          color: '#f9fafb',
+          fontSize: '1.2rem',
+          fontWeight: 600,
+          color: '#f3f4f6',
           fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '-0.01em',
+          lineHeight: 1.1,
+          marginBottom: '5px',
         }}>
           ${amt.toFixed(2)}
           {adjusted && (
@@ -668,8 +875,16 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
             </span>
           )}
         </div>
+        {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
+        <ShiftPlatoonLine
+          shift={resolveClaimShift(claim)}
+          platoon={resolveClaimPlatoon(claim)}
+          date={claim.date}
+        />
+        {/* Line 4 — captured station context (omitted when none) */}
+        <StationContextLine stations={resolveClaimStations(claim)} />
         {(claim.payslip_pay_nbr || claim.payment_method) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
             {claim.payslip_pay_nbr && (
               <span style={{ fontSize: '0.69rem', color: '#6b7280' }}>
                 Pay #{claim.payslip_pay_nbr}
@@ -688,11 +903,14 @@ function FlatClaimCard({ claim, onEdit, session, activeFY }) {
         gap: '6px',
         flexShrink: 0,
       }}>
-        {/* FlatClaimCard = ungrouped/legacy claims only.
-            payment_status badge if set; otherwise status badge (these rows
-            predate multi-component architecture and have no payment_status). */}
+        {/* FlatClaimCard = ungrouped/legacy claims only. Single-component, so the
+            shared progress badge renders as a plain "Paid"/"Pending" (count
+            dropped). Truly legacy rows (no payment_status) keep the status badge. */}
         {claim.payment_status != null
-          ? <PaymentStatusBadge paymentStatus={claim.payment_status} />
+          ? <PaymentProgressBadge
+              paidCount={(claim.payment_status || '').toLowerCase() === 'paid' ? 1 : 0}
+              totalCount={1}
+            />
           : <StatusBadge status={claim.status} />
         }
         <div style={{ display: 'flex', gap: '6px' }}>
@@ -771,6 +989,9 @@ export default function ExpandableClaimList({
   paymentMethodFilter,
   paymentDateFrom,
   paymentDateTo,
+  shiftFilter = 'all',
+  platoonFilter = 'all',
+  searchText = '',
   onEdit,
   session,
   activeFY,
@@ -830,6 +1051,9 @@ export default function ExpandableClaimList({
     paymentStatus:   paymentStatusFilter,
     paymentMethod:   paymentMethodFilter || 'all',
     claimType:       filterType || 'all',
+    shift:           shiftFilter || 'all',
+    platoon:         platoonFilter || 'all',
+    search:          searchText || '',
     paymentDateFrom: paymentDateFrom || null,
     paymentDateTo:   paymentDateTo   || null,
     claimDateFrom:   null,

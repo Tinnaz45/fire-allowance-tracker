@@ -7,7 +7,11 @@ import { useClaims } from '@/lib/claims/ClaimsContext'
 import { useRates } from '@/lib/calculations/RatesContext'
 import { useFY } from '@/lib/fy/FinancialYearContext'
 import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
+import { resolveClaimShift, resolveClaimPlatoon } from '@/lib/claims/claimMeta'
+import { resolveOperationalPlatoon } from '@/lib/platoon/resolveOperationalPlatoon'
 import ClaimForm from '@/components/claims/ClaimForm'
+import PlatoonBanner from '@/components/claims/PlatoonBanner'
+import PlatoonPicker from '@/components/profile/PlatoonPicker'
 import ExpandableClaimList from '@/components/claims/ExpandableClaimList'
 import GroupedClaimList from '@/components/claims/GroupedClaimList'
 import AppShell from '@/components/nav/AppShell'
@@ -47,8 +51,21 @@ function EditClaimModal({ claim, session, activeFY, onClose, onSuccess }) {
     String(claim.total_amount ?? claim.amount ?? claim.meal_amount ?? '')
   )
   const [status, setStatus] = useState(claim.status || 'Pending')
+  const [shift, setShift] = useState(resolveClaimShift(claim) || '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
+
+  // Meal claims (Spoilt / Delayed) expose a manual platoon override at creation
+  // time, so the edit flow must let that captured value survive an edit rather
+  // than silently re-deriving it. For every other claim type platoon stays a
+  // deterministic auto-derived value (date + shift), unchanged from before.
+  const isMeal = claim.claimType === 'spoilt' || claim.claimType === 'delayed_meal'
+  const [mealPlatoon, setMealPlatoon] = useState(resolveClaimPlatoon(claim) || '')
+
+  // Auto-derived platoon (deterministic FRV rotation). For meal claims an
+  // explicit override wins; otherwise this auto value is used everywhere.
+  const autoPlatoon = resolveOperationalPlatoon(date, shift)
+  const resolvedPlatoon = isMeal ? (mealPlatoon || autoPlatoon) : autoPlatoon
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -67,6 +84,8 @@ function EditClaimModal({ claim, session, activeFY, onClose, onSuccess }) {
         date,
         amount,
         status,
+        shift: shift || null,
+        platoon: resolvedPlatoon,
         financialYearId: activeFY?.id || null,
       })
       onSuccess()
@@ -98,6 +117,29 @@ function EditClaimModal({ claim, session, activeFY, onClose, onSuccess }) {
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
             style={{ ...INPUT_STYLE, colorScheme: 'dark' }} />
         </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label style={LABEL_STYLE}>Shift Type</label>
+          <select value={shift} onChange={(e) => setShift(e.target.value)}
+            style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+            <option value="">No shift set</option>
+            <option value="Day">Day Shift</option>
+            <option value="Night">Night Shift</option>
+          </select>
+          <div style={{ marginTop: '10px' }}>
+            <PlatoonBanner date={date} shift={shift} />
+          </div>
+        </div>
+
+        {isMeal && (
+          <div style={{ marginBottom: '16px' }}>
+            <label style={LABEL_STYLE}>Platoon</label>
+            <PlatoonPicker value={resolvedPlatoon || ''} onChange={setMealPlatoon} idPrefix="edit-meal-platoon" />
+            <p style={{ marginTop: '4px', fontSize: '0.74rem', color: '#6b7280' }}>
+              Auto-resolved from date + shift{autoPlatoon ? ` (Platoon ${autoPlatoon})` : ''}. Override if different for this meal.
+            </p>
+          </div>
+        )}
 
         <div style={{ marginBottom: '16px' }}>
           <label style={LABEL_STYLE}>Amount ($)</label>
@@ -411,6 +453,10 @@ export default function HomePage() {
   const [paymentDateFrom, setPaymentDateFrom] = useState('')
   const [paymentDateTo, setPaymentDateTo] = useState('')
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
+  // Shift / platoon visibility filters + free-text search
+  const [shiftFilter, setShiftFilter] = useState('all')       // 'all' | 'Day' | 'Night'
+  const [platoonFilter, setPlatoonFilter] = useState('all')   // 'all' | 'A' | 'B' | 'C' | 'D'
+  const [searchText, setSearchText] = useState('')
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -659,6 +705,14 @@ export default function HomePage() {
               {/* Sort + Type filter + Advanced filters toggle */}
               {activeTab !== 'payslip' && activeTab !== 'petty-cash' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <input
+                  type="search"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder="Search claims — type, #, shift, platoon, date…"
+                  aria-label="Search claims"
+                  style={{ ...selectStyle, width: '100%', minWidth: '220px', cursor: 'text' }}
+                />
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <select value={filterType} onChange={(e) => setFilterType(e.target.value)}
                     style={selectStyle}>
@@ -666,6 +720,22 @@ export default function HomePage() {
                     {CLAIM_TYPE_ORDER.map((t) => (
                       <option key={t} value={t}>{CLAIM_TYPE_LABELS[t]}</option>
                     ))}
+                  </select>
+
+                  <select value={shiftFilter} onChange={(e) => setShiftFilter(e.target.value)}
+                    style={selectStyle} aria-label="Filter by shift type">
+                    <option value="all">All shifts</option>
+                    <option value="Day">Day shift</option>
+                    <option value="Night">Night shift</option>
+                  </select>
+
+                  <select value={platoonFilter} onChange={(e) => setPlatoonFilter(e.target.value)}
+                    style={selectStyle} aria-label="Filter by platoon">
+                    <option value="all">All platoons</option>
+                    <option value="A">Platoon A</option>
+                    <option value="B">Platoon B</option>
+                    <option value="C">Platoon C</option>
+                    <option value="D">Platoon D</option>
                   </select>
 
                   <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
@@ -749,6 +819,9 @@ export default function HomePage() {
                           setPaymentMethodFilter(undefined)
                           setPaymentDateFrom('')
                           setPaymentDateTo('')
+                          setShiftFilter('all')
+                          setPlatoonFilter('all')
+                          setSearchText('')
                         }}
                         style={{
                           padding: '8px 14px',
@@ -786,6 +859,9 @@ export default function HomePage() {
                   paymentMethodFilter={paymentMethodFilter}
                   paymentDateFrom={paymentDateFrom}
                   paymentDateTo={paymentDateTo}
+                  shiftFilter={shiftFilter}
+                  platoonFilter={platoonFilter}
+                  searchText={searchText}
                   onEdit={setEditingClaim}
                   session={session}
                   activeFY={activeFY}

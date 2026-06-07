@@ -10,12 +10,36 @@ import { useState } from 'react'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import {
+  resolveClaimShift,
+  resolveClaimPlatoon,
+  resolveGroupShift,
+  resolveGroupPlatoon,
+  resolveClaimStations,
+  resolveGroupStations,
+} from '@/lib/claims/claimMeta'
+import {
   resolveEffectiveAmount,
   isClaimOverdue,
-  formatDateDDMMYY,
 } from '@/lib/calculations/engine'
+import ShiftPlatoonLine from '@/components/claims/ShiftPlatoonLine'
+import StationContextLine from '@/components/claims/StationContextLine'
+import PaymentProgressBadge from '@/components/claims/PaymentProgressBadge'
 import MarkPaidPayNumberModal from '@/components/claims/MarkPaidPayNumberModal'
 import DeleteConfirmModal from '@/components/claims/DeleteConfirmModal'
+
+// Line 1 of a claim card: "[Claim Type] #[Number]". Falls back to the persisted
+// group label (which already embeds the number) when claim number is absent.
+function groupHeaderTitle(group) {
+  const typeLabel = CLAIM_TYPE_LABELS[group?.claim_type] || group?.claim_type || 'Claim'
+  if (group?.claim_number != null) return `${typeLabel} #${group.claim_number}`
+  return group?.label || typeLabel
+}
+
+function claimHeaderTitle(claim) {
+  const typeLabel = CLAIM_TYPE_LABELS[claim?.claimType] || claim?.claimType || 'Claim'
+  if (claim?.claim_number != null) return `${typeLabel} #${claim.claim_number}`
+  return typeLabel
+}
 
 function resolveChildLabel(claim) {
   const ai = claim.calculation_inputs || {}
@@ -244,36 +268,44 @@ function GroupCard({ groupEntry, session, activeFY }) {
     .filter((c) => (c.payment_status || 'Pending').toLowerCase() === 'paid')
     .reduce((sum, c) => sum + resolveComponentAmount(c), 0)
 
-  // CANONICAL: pending count from paidCount + totalCount (from ClaimsContext)
-  const pendingCount = totalCount - paidCount
-
-  // Payment badge always derived from derivedPaymentStatus (canonical truth)
-  const paymentBadge = (() => {
-    if (totalCount === 0) return null
-    if (derivedPaymentStatus === 'Paid')           return { text: '✓ All Paid',                    color: '#86efac', bg: 'rgba(34,197,94,0.12)',    border: 'rgba(34,197,94,0.4)'    }
-    if (derivedPaymentStatus === 'Partially Paid') return { text: `${paidCount}/${totalCount} Paid`, color: '#a5b4fc', bg: 'rgba(99,102,241,0.1)',   border: 'rgba(99,102,241,0.35)'  }
-    return { text: `0/${totalCount} Paid`, color: '#fde68a', bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.25)' }
-  })()
   return (
     <div style={{ borderRadius: '12px', border: isOverdue ? '1.5px solid rgba(239,68,68,0.5)' : '1px solid #2a2a2a', background: isOverdue ? 'rgba(251,191,36,0.03)' : '#111', marginBottom: '12px', overflow: 'hidden' }}>
       <div onClick={() => setCollapsed((v) => !v)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer', borderBottom: collapsed ? 'none' : '1px solid #1e1e1e', gap: '8px', background: '#161616' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
           <span style={{ color: '#4b5563', fontSize: '0.7rem', flexShrink: 0 }}>{collapsed ? '▶' : '▼'}</span>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#f9fafb', marginBottom: '3px' }}>{group.label}</div>
-            <div style={{ fontSize: '0.72rem', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-              <span>{children.length} item{children.length !== 1 ? 's' : ''}</span>
-              <span>·</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>Total: <strong style={{ color: '#f9fafb' }}>${totalAmt.toFixed(2)}</strong></span>
-              {paidAmt > 0 && paidAmt < totalAmt && <span style={{ color: '#4ade80', fontVariantNumeric: 'tabular-nums' }}>· Paid: ${paidAmt.toFixed(2)}</span>}
+            {/* Line 1 — "[Claim Type] #[Number]" */}
+            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#f9fafb', marginBottom: '3px' }}>{groupHeaderTitle(group)}</div>
+            {/* Line 2 — claim value (primary scannable figure) + item count + paid-so-far */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>
+              <span style={{
+                fontSize: '1.2rem',
+                fontWeight: 600,
+                color: '#f3f4f6',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
+                lineHeight: 1.1,
+              }}>
+                ${totalAmt.toFixed(2)}
+              </span>
+              <span style={{ fontSize: '0.72rem', color: '#6b7280' }}>{children.length} item{children.length !== 1 ? 's' : ''}</span>
+              {paidAmt > 0 && paidAmt < totalAmt && <span style={{ fontSize: '0.72rem', color: '#4ade80', fontVariantNumeric: 'tabular-nums' }}>${paidAmt.toFixed(2)} paid</span>}
             </div>
+            {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
+            <ShiftPlatoonLine
+              shift={resolveGroupShift(groupEntry)}
+              platoon={resolveGroupPlatoon(groupEntry)}
+              date={group.incident_date}
+            />
+            {/* Line 4 — captured station context (omitted when none) */}
+            <StationContextLine stations={resolveGroupStations(groupEntry)} />
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {isOverdue && <span style={{ fontSize: '0.64rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '4px', padding: '2px 6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>🚩 Overdue</span>}
-          {paymentBadge && <span style={{ fontSize: '0.65rem', fontWeight: 700, color: paymentBadge.color, background: paymentBadge.bg, border: '1px solid ' + paymentBadge.border, borderRadius: '5px', padding: '2px 7px', letterSpacing: '0.03em' }}>{paymentBadge.text}</span>}
-          {/* CANONICAL: show derivedPaymentStatus badge, not DB parent_status */}
-          <StatusBadge status={derivedPaymentStatus} />
+          {/* Single payment-progress badge — status word + count in one chip.
+              Canonical: paidCount/totalCount from payment_status (ClaimsContext). */}
+          <PaymentProgressBadge paidCount={paidCount} totalCount={totalCount} />
         </div>
       </div>
       {!collapsed && children.length > 0 && (
@@ -317,26 +349,43 @@ function UngroupedCard({ claim, onEdit, session, activeFY }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '12px 16px', borderRadius: '10px', border: overdue ? '1px solid rgba(239,68,68,0.5)' : '1px solid #2a2a2a', background: overdue ? 'rgba(251,191,36,0.03)' : '#111', marginBottom: '8px', gap: '8px' }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginBottom: '2px' }}>
-          {formatDateDDMMYY(claim.date)} · {CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType}
-          {overdue && <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700 }}>🚩 Overdue</span>}
+        {/* Line 1 — "[Claim Type] #[Number]" */}
+        <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f9fafb', marginBottom: '2px' }}>
+          {claimHeaderTitle(claim)}
+          {overdue && <span style={{ marginLeft: '8px', color: '#f87171', fontWeight: 700, fontSize: '0.72rem' }}>🚩 Overdue</span>}
         </div>
-        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f9fafb', fontVariantNumeric: 'tabular-nums' }}>${amt.toFixed(2)}</div>
+        {/* Line 2 — amount (primary scannable figure) */}
+        <div style={{ fontSize: '1.2rem', fontWeight: 600, color: '#f3f4f6', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.01em', lineHeight: 1.1, marginBottom: '5px' }}>${amt.toFixed(2)}</div>
+        {/* Line 3 — "[Date]  [Shift] [Platoon]" */}
+        <ShiftPlatoonLine
+          shift={resolveClaimShift(claim)}
+          platoon={resolveClaimPlatoon(claim)}
+          date={claim.date}
+        />
+        {/* Line 4 — captured station context (omitted when none) */}
+        <StationContextLine stations={resolveClaimStations(claim)} />
         {(claim.payslip_pay_nbr || claim.payment_method) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
             {claim.payslip_pay_nbr && <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>Pay #{claim.payslip_pay_nbr}</span>}
             <PaymentMethodBadge method={claim.payment_method} />
           </div>
         )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
-        {claim.payment_status != null && (
+        {/* Single-component ungrouped claim: shared progress badge renders as a
+            plain "Paid"/"Pending". Truly legacy rows (no payment_status) keep the
+            legacy status badge — mirrors FlatClaimCard for cross-view consistency. */}
+        {claim.payment_status != null ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <PaymentStatusBadge paymentStatus={claim.payment_status} />
+            <PaymentProgressBadge
+              paidCount={(claim.payment_status || '').toLowerCase() === 'paid' ? 1 : 0}
+              totalCount={1}
+            />
             <QuickPayToggle claim={claim} session={session} activeFY={activeFY} />
           </div>
+        ) : (
+          <StatusBadge status={claim.status} />
         )}
-        <StatusBadge status={claim.status} />
         <div style={{ display: 'flex', gap: '6px' }}>
           {onEdit && (
             <button onClick={() => onEdit(claim)} style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #374151', borderRadius: '6px', color: '#9ca3af', cursor: 'pointer', fontSize: '0.74rem', fontWeight: 600 }}>

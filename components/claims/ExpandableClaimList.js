@@ -93,6 +93,69 @@ function resolveChildLabel(claim) {
   return CLAIM_TYPE_LABELS[claim.claimType] || claim.claimType
 }
 
+// ─── Payment-stream grouping (display-only) ─────────────────────────────────────
+// Generated entitlements are split into payment streams for scannability. The
+// stream is read STRICTLY from each sub-claim's persisted payment_method —
+// rows that don't yet carry one fall into "Unassigned" (we never guess a stream
+// from the entitlement type). payment_method is a canonical concern and is only
+// stamped on a prototype row once it's marked paid via the pay-stream flow, so
+// "Unassigned" is the expected resting state for freshly generated entitlements.
+
+const STREAM = { PAYSLIP: 'payslip', PETTY_CASH: 'petty_cash', UNASSIGNED: 'unassigned' }
+const STREAM_ORDER = [STREAM.PAYSLIP, STREAM.PETTY_CASH, STREAM.UNASSIGNED]
+const STREAM_META = {
+  [STREAM.PAYSLIP]:    { label: 'Payslip Sub-Claims',    icon: '📋', color: '#a5b4fc', bg: 'rgba(99,102,241,0.10)',  border: 'rgba(99,102,241,0.35)' },
+  [STREAM.PETTY_CASH]: { label: 'Petty Cash Sub-Claims', icon: '💵', color: '#fdba74', bg: 'rgba(251,146,60,0.10)',  border: 'rgba(251,146,60,0.35)' },
+  [STREAM.UNASSIGNED]: { label: 'Unassigned',            icon: '○',  color: '#9ca3af', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.30)' },
+}
+
+// Normalize a stored payment_method ('Payslip' / 'Petty Cash' / canonical
+// 'payslip'/'petty_cash') to a display stream. Anything unrecognized → unassigned.
+function resolvePaymentStream(claim) {
+  const raw = (claim?.payment_method ?? '').toString().trim().toLowerCase().replace(/[^a-z]/g, '')
+  if (raw === 'payslip')   return STREAM.PAYSLIP
+  if (raw === 'pettycash') return STREAM.PETTY_CASH
+  return STREAM.UNASSIGNED
+}
+
+// ─── SubClaimGroupHeader ────────────────────────────────────────────────────────
+// Compact payment-stream section label: chip (icon + name + count) + stream subtotal.
+
+function SubClaimGroupHeader({ stream, count, subtotal }) {
+  const meta = STREAM_META[stream] || STREAM_META[STREAM.UNASSIGNED]
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '8px',
+      margin: '10px 0 2px',
+      flexWrap: 'wrap',
+    }}>
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px',
+        padding: '2px 8px',
+        borderRadius: '5px',
+        fontSize: '0.63rem',
+        fontWeight: 700,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        background: meta.bg,
+        border: `1px solid ${meta.border}`,
+        color: meta.color,
+      }}>
+        {meta.icon} {meta.label}
+        <span style={{ opacity: 0.7, fontWeight: 600 }}>· {count}</span>
+      </span>
+      <span style={{ fontSize: '0.72rem', color: '#6b7280', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+        ${subtotal.toFixed(2)}
+      </span>
+    </div>
+  )
+}
+
 // ─── Retain container hiding ───────────────────────────────────────────────────
 // Once retain entitlement children exist (Maint Stn N/N, meals), the retain
 // parent row is a pure grouping container — its dollars are already zeroed in
@@ -310,9 +373,12 @@ function SubClaimRow({ claim, session, activeFY, isLast }) {
       padding: '9px 0',
       borderBottom: isLast ? 'none' : '1px solid #1e1e1e',
       gap: '8px',
+      // Wrap on narrow (iPhone-width) screens so the action cluster drops below
+      // the label instead of starving it; stays single-line where there's room.
+      flexWrap: 'wrap',
     }}>
       {/* Left: tree connector + label + method badge */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: 0, flex: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: '150px', flex: '1 1 auto' }}>
         <span style={{
           color: '#374151',
           fontSize: '0.78rem',
@@ -371,6 +437,25 @@ function SubClaimRow({ claim, session, activeFY, isLast }) {
         }}>
           ${amt.toFixed(2)}
         </span>
+        {/* Manual override indicator — amount was edited away from the generated value */}
+        {isAmountAdjusted(claim) && (
+          <span
+            title="Amount manually adjusted"
+            style={{
+              fontSize: '0.62rem',
+              fontWeight: 700,
+              color: '#fbbf24',
+              background: 'rgba(251,191,36,0.12)',
+              border: '1px solid rgba(251,191,36,0.35)',
+              borderRadius: '4px',
+              padding: '1px 5px',
+              letterSpacing: '0.03em',
+              flexShrink: 0,
+            }}
+          >
+            Adj
+          </span>
+        )}
         {/* CANONICAL: always show PaymentStatusBadge from payment_status */}
         <PaymentStatusBadge paymentStatus={claim.payment_status || 'Pending'} />
         <QuickPayToggle claim={claim} session={session} activeFY={activeFY} />
@@ -560,20 +645,52 @@ function ExpandableGroupRow({ groupEntry, onEdit, session, activeFY }) {
       {/* ── Expanded sub-claim body ── */}
       {expanded && (
         <div style={{ padding: '4px 16px 12px 16px', background: '#0f0f0f' }}>
+          {/* Parent operational-claim framing for the generated entitlements below */}
+          <div style={{
+            fontSize: '0.63rem',
+            fontWeight: 700,
+            color: '#4b5563',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            margin: '6px 0 2px',
+          }}>
+            Generated Entitlements
+          </div>
           {children.length === 0 ? (
             <p style={{ fontSize: '0.8rem', color: '#4b5563', margin: '10px 0' }}>
               No payment components on this claim.
             </p>
           ) : (
-            children.map((child, i) => (
-              <SubClaimRow
-                key={`${child.claimType}-${child.id}`}
-                claim={child}
-                session={session}
-                activeFY={activeFY}
-                isLast={i === children.length - 1}
-              />
-            ))
+            // Group entitlements by payment stream (Payslip / Petty Cash / Unassigned).
+            // Each non-empty stream gets a labelled, colour-keyed, indented block so
+            // the operator can tell streams apart without reading entitlement names.
+            STREAM_ORDER.map((stream) => {
+              const rows = children.filter((c) => resolvePaymentStream(c) === stream)
+              if (rows.length === 0) return null
+              const meta = STREAM_META[stream]
+              const subtotal = rows.reduce((s, c) => s + resolveComponentAmount(c), 0)
+              return (
+                <div
+                  key={stream}
+                  style={{
+                    borderLeft: `2px solid ${meta.border}`,
+                    paddingLeft: '10px',
+                    marginBottom: '2px',
+                  }}
+                >
+                  <SubClaimGroupHeader stream={stream} count={rows.length} subtotal={subtotal} />
+                  {rows.map((child, i) => (
+                    <SubClaimRow
+                      key={`${child.claimType}-${child.id}`}
+                      claim={child}
+                      session={session}
+                      activeFY={activeFY}
+                      isLast={i === rows.length - 1}
+                    />
+                  ))}
+                </div>
+              )
+            })
           )}
 
           {/* Edit + Delete buttons in expanded footer */}

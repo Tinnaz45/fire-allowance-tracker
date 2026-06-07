@@ -95,11 +95,18 @@ function resolveChildLabel(claim) {
 
 // ─── Payment-stream grouping (display-only) ─────────────────────────────────────
 // Generated entitlements are split into payment streams for scannability. The
-// stream is read STRICTLY from each sub-claim's persisted payment_method —
-// rows that don't yet carry one fall into "Unassigned" (we never guess a stream
-// from the entitlement type). payment_method is a canonical concern and is only
-// stamped on a prototype row once it's marked paid via the pay-stream flow, so
-// "Unassigned" is the expected resting state for freshly generated entitlements.
+// stream is resolved with a priority cascade so the grouping reflects payment
+// BUSINESS RULES, not just storage state:
+//   1. Persisted payment_method (canonical truth) when present.
+//   2. Generated-entitlement slug (calculation_inputs.autoChild) — the most
+//      reliable signal for prototype rows, which don't carry payment_method.
+//   3. Top-level claimType (parent / single-component rows).
+//   4. Resolved label text — catches equivalents (e.g. "Fire Call") that share
+//      no slug/type with the canonical set.
+// "Unassigned" is reserved for genuinely unknown entitlement types; known types
+// always land under Payslip or Petty Cash even when payment_method is null.
+// This is display-only — payment_method remains a canonical concern, untouched
+// by this routing (see standby_entitlement_split / standby_md_creation memory).
 
 const STREAM = { PAYSLIP: 'payslip', PETTY_CASH: 'petty_cash', UNASSIGNED: 'unassigned' }
 const STREAM_ORDER = [STREAM.PAYSLIP, STREAM.PETTY_CASH, STREAM.UNASSIGNED]
@@ -109,12 +116,79 @@ const STREAM_META = {
   [STREAM.UNASSIGNED]: { label: 'Unassigned',            icon: '○',  color: '#9ca3af', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.30)' },
 }
 
-// Normalize a stored payment_method ('Payslip' / 'Petty Cash' / canonical
-// 'payslip'/'petty_cash') to a display stream. Anything unrecognized → unassigned.
+// Generated-entitlement slug (calculation_inputs.autoChild) → payment stream.
+// Payroll allowances go to Payslip; reimbursements (meals, travel) to Petty Cash.
+const AUTOCHILD_STREAM = {
+  // ── Payslip (payroll) ──
+  callback_ops:            STREAM.PAYSLIP,
+  standby_and_dismi:       STREAM.PAYSLIP,
+  md_event:                STREAM.PAYSLIP,
+  maint_stn_nn:            STREAM.PAYSLIP,
+  // ── Petty Cash (reimbursement) ──
+  excess_travel:           STREAM.PETTY_CASH,
+  standby_travel:          STREAM.PETTY_CASH, // legacy slug
+  standby_excess_travel:   STREAM.PETTY_CASH,
+  petty_cash_meal:         STREAM.PETTY_CASH,
+  petty_cash_travel_night: STREAM.PETTY_CASH, // legacy slug
+  standby_small_meal:      STREAM.PETTY_CASH,
+  retain_meal:             STREAM.PETTY_CASH,
+  overnight_cash:          STREAM.PETTY_CASH,
+}
+
+// Top-level claimType → payment stream (parent / single-component rows that
+// carry no autoChild slug). Operational allowances are paid through payroll;
+// stand-alone meal claims are reimbursed through petty cash.
+const CLAIM_TYPE_STREAM = {
+  recalls:      STREAM.PAYSLIP,
+  retain:       STREAM.PAYSLIP,
+  standby:      STREAM.PAYSLIP,
+  md:           STREAM.PAYSLIP,
+  spoilt:       STREAM.PETTY_CASH,
+  delayed_meal: STREAM.PETTY_CASH,
+}
+
+// Last-resort heuristic: derive a stream from the human label so equivalents
+// not covered by a slug/type (e.g. "Fire Call") still route. Returns null when
+// nothing recognisable matches, so the caller can fall through to Unassigned.
+function streamFromLabel(label) {
+  const t = (label ?? '').toString().toLowerCase()
+  if (!t) return null
+  // Reimbursements first — "meal"/"travel" are unambiguous petty-cash signals.
+  if (t.includes('meal') || t.includes('travel') || t.includes('spoilt') || t.includes('overnight')) {
+    return STREAM.PETTY_CASH
+  }
+  if (
+    t.includes('recall') || t.includes('callback') || t.includes('call back') ||
+    t.includes('fire call') || t.includes('firecall') ||
+    t.includes('standby') || t.includes('dismi') || t.includes('muster') ||
+    t.includes('maint')
+  ) {
+    return STREAM.PAYSLIP
+  }
+  return null
+}
+
+// Resolve a sub-claim/entitlement to its display payment stream via a priority
+// cascade (see block comment above). Calculations, generation, persistence and
+// reconciliation are unaffected — this only chooses a display bucket.
 function resolvePaymentStream(claim) {
+  // 1. Persisted payment_method ('Payslip' / 'Petty Cash' / canonical slugs).
   const raw = (claim?.payment_method ?? '').toString().trim().toLowerCase().replace(/[^a-z]/g, '')
   if (raw === 'payslip')   return STREAM.PAYSLIP
   if (raw === 'pettycash') return STREAM.PETTY_CASH
+
+  // 2. Generated-entitlement slug.
+  const autoChild = claim?.calculation_inputs?.autoChild
+  if (autoChild && AUTOCHILD_STREAM[autoChild]) return AUTOCHILD_STREAM[autoChild]
+
+  // 3. Top-level claim type.
+  if (claim?.claimType && CLAIM_TYPE_STREAM[claim.claimType]) return CLAIM_TYPE_STREAM[claim.claimType]
+
+  // 4. Label heuristic (catches equivalents with no slug/type mapping).
+  const fromLabel = streamFromLabel(resolveChildLabel(claim))
+  if (fromLabel) return fromLabel
+
+  // 5. Genuinely unknown — leave Unassigned.
   return STREAM.UNASSIGNED
 }
 

@@ -100,9 +100,12 @@ function RosteredStationField({ id, value, onChange, stations, profile, help }) 
   )
 }
 
-// Generic operational station picker (no profile default). Used by the meal
-// claims to capture where the meal event occurred.
-function OperationalStationField({ id, label, value, onChange, stations, help }) {
+// Operational station picker for the meal claims. Auto-fills from the user's
+// rostered station (profile) so the operator never re-picks the same station,
+// while staying fully editable: the shared StationPicker surfaces a "From
+// Profile" / "Custom" badge and Change workflow exactly like Recall/Standby.
+// When the user overrides the station the badge flips to "Custom".
+function OperationalStationField({ id, label, value, onChange, stations, profileLabel, help }) {
   return (
     <div style={FIELD}>
       <label style={LABEL_STYLE} htmlFor={id}>{label}</label>
@@ -111,8 +114,9 @@ function OperationalStationField({ id, label, value, onChange, stations, help })
         value={value || ''}
         onChange={onChange}
         stations={stations}
-        placeholder="Search by FS number or name (e.g. 43 or Deer Park)"
+        placeholder={profileLabel || 'Search by FS number or name (e.g. 43 or Deer Park)'}
         ariaLabel={label}
+        profileLabel={profileLabel || ''}
       />
       {help && <p style={HELP_STYLE}>{help}</p>}
     </div>
@@ -696,7 +700,8 @@ function StandbyInputs({ values, onChange, date, nightMealEligible, profile, use
 // When 'delayed_meal', the Meal Type selector is hidden — meal_type is forced to
 // 'Delayed' by the virtual claimType resolution in ClaimsContext/addClaim.
 
-function SpoiltInputs({ values, onChange, date, claimType, stations }) {
+function SpoiltInputs({ values, onChange, date, claimType, stations, profile }) {
+  const operationalIsDefault = !!profile?.stationLabel && values.operationalStn === profile.stationLabel
   const mealWin = getMealWindow(values.shift)
   const incidentStatus = values.incidentTime
     ? checkTimeInMealWindow(values.incidentTime, values.shift)
@@ -716,7 +721,12 @@ function SpoiltInputs({ values, onChange, date, claimType, stations }) {
         value={values.operationalStn}
         onChange={(text) => onChange('operationalStn', text)}
         stations={stations}
-        help="Station where the meal event occurred. Captured for reconciliation — does not affect the amount."
+        profileLabel={profile?.stationLabel || ''}
+        help={
+          operationalIsDefault
+            ? 'Defaulted from your rostered station. Change if this meal occurred elsewhere.'
+            : 'Station where the meal event occurred. Captured for reconciliation — does not affect the amount.'
+        }
       />
 
       {/* Only show Meal Type selector for 'spoilt' — for 'delayed_meal' it is forced */}
@@ -909,6 +919,14 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     if ((claimType === 'standby' || claimType === 'md') && profile?.stationLabel) {
       defaults.rosteredStn = profile.stationLabel
     }
+    // Spoilt + Delayed meal claims auto-fill the Operational Station from the
+    // rostered station so the operator never re-picks the same station. It stays
+    // fully editable (StationPicker shows From Profile / Custom + Change), and
+    // because this effect re-runs when `profile` changes the default tracks the
+    // user's rostered station until they manually override it for this claim.
+    if ((claimType === 'spoilt' || claimType === 'delayed_meal') && profile?.stationLabel) {
+      defaults.operationalStn = profile.stationLabel
+    }
     setFields(defaults)
     setBreakdown(null)
     setAdjustedAmount(null)
@@ -1022,6 +1040,14 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       const m = parseInt(padded.slice(2, 4), 10)
       if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) {
         setError('Arrival Time must be a valid 24hr time (e.g. 08:30, 19:30).'); return
+      }
+    }
+    // Operational Station is required for the meal claims. It auto-fills from
+    // the rostered station, so this only fires if the operator explicitly
+    // cleared it without picking a replacement.
+    if (claimType === 'spoilt' || claimType === 'delayed_meal') {
+      if (!getExplicitlyResolvedStation(fields.operationalStn, stations)) {
+        setError('Operational Station is required. Pick the station where the meal occurred.'); return
       }
     }
     // Retain is hours-first: a claim with generated_hours > 0 is valid. The
@@ -1157,7 +1183,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       )}
       {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} date={date} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
       {(claimType === 'spoilt' || claimType === 'delayed_meal') && (
-        <SpoiltInputs values={fields} onChange={handleFieldChange} date={date} claimType={claimType} stations={stations} />
+        <SpoiltInputs values={fields} onChange={handleFieldChange} date={date} claimType={claimType} stations={stations} profile={profile} />
       )}
 
       {showCalcLines && (

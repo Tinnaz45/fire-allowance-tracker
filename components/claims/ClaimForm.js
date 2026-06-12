@@ -703,6 +703,10 @@ function StandbyInputs({ values, onChange, date, nightMealEligible, profile, use
 function SpoiltInputs({ values, onChange, date, claimType, stations, profile }) {
   const operationalIsDefault = !!profile?.stationLabel && values.operationalStn === profile.stationLabel
   const mealWin = getMealWindow(values.shift)
+  // Guard with || '' — on claim-type switch this renders once before the
+  // fields-reset effect seeds the new defaults, so the key can be undefined.
+  const firecallNumber  = values.firecallNumber || ''
+  const firecallPartial = firecallNumber !== '' && !/^\d{5}$/.test(firecallNumber)
   const incidentStatus = values.incidentTime
     ? checkTimeInMealWindow(values.incidentTime, values.shift)
     : null
@@ -767,6 +771,27 @@ function SpoiltInputs({ values, onChange, date, claimType, stations, profile }) 
       />
 
       <div style={FIELD}>
+        <label style={LABEL_STYLE} htmlFor="meal-firecall-number-input">Firecall Number</label>
+        <input
+          id="meal-firecall-number-input"
+          type="text"
+          inputMode="numeric"
+          maxLength={5}
+          placeholder="e.g. 12345"
+          value={firecallNumber}
+          onChange={(e) => onChange('firecallNumber', e.target.value.replace(/\D/g, '').slice(0, 5))}
+          style={INPUT_STYLE}
+        />
+        {firecallPartial ? (
+          <p style={{ ...HELP_STYLE, color: '#fbbf24' }}>
+            Firecall number must be exactly 5 digits ({firecallNumber.length}/5).
+          </p>
+        ) : (
+          <p style={HELP_STYLE}>Required. The 5-digit firecall number for the incident.</p>
+        )}
+      </div>
+
+      <div style={FIELD}>
         <label style={LABEL_STYLE}>Incident Time (optional)</label>
         <TimeInput24
           value={values.incidentTime}
@@ -792,8 +817,8 @@ const DEFAULTS = {
   retain:       { shift: 'Day', bookedOffTime: '' },
   standby:      { standbyType: 'Standby', rosteredStn: '', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
   md:           { standbyType: 'M&D',     rosteredStn: '', standbyStn: '', distKm: '', shift: 'Day', arrivedTime: '' },
-  spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', operationalStn: '', platoon: '' },
-  delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', operationalStn: '', platoon: '' },
+  spoilt:       { mealType: 'Spoilt',   shift: 'Day', incidentTime: '', operationalStn: '', platoon: '', firecallNumber: '' },
+  delayed_meal: { mealType: 'Delayed',  shift: 'Day', incidentTime: '', operationalStn: '', platoon: '', firecallNumber: '' },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1048,6 +1073,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     if (claimType === 'spoilt' || claimType === 'delayed_meal') {
       if (!getExplicitlyResolvedStation(fields.operationalStn, stations)) {
         setError('Operational Station is required. Pick the station where the meal occurred.'); return
+      }
+      if (!/^\d{5}$/.test(fields.firecallNumber || '')) {
+        setError('Firecall Number is required and must be exactly 5 digits (e.g. 12345).'); return
       }
     }
     // Retain is hours-first: a claim with generated_hours > 0 is valid. The

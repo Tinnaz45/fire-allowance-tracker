@@ -4,11 +4,12 @@
 // Single source of truth for all authenticated navigation.
 // Rendered inside AppShell. Never import this directly — use AppShell instead.
 //
-// Tabs:   Dashboard (/)  ·  Tax (/tax)  ·  Profile (/profile)  ·  Settings (/settings)
+// Tabs:   Dashboard (/)  ·  Tax (/tax)  ·  Payments (/payments)  ·  Profile (/profile)  ·  Settings (/settings)
 //
 // Active-route logic:
 //   - '/'        → exact match only
 //   - '/tax'     → startsWith('/tax')
+//   - '/payments'→ startsWith('/payments')
 //   - '/profile' → startsWith('/profile')
 //   - '/settings'→ startsWith('/settings')
 //   Future deep routes (e.g. /claims/[id]) resolve to the nearest parent tab.
@@ -40,6 +41,18 @@ const TABS = [
       <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.2 : 1.8}
           d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'payments',
+    label: 'Payments',
+    href: '/payments',
+    match: (p) => p.startsWith('/payments'),
+    icon: (active) => (
+      <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.2 : 1.8}
+          d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
       </svg>
     ),
   },

@@ -20,9 +20,12 @@ import ReconciliationQueues from '@/components/reconciliation/ReconciliationQueu
 import PaymentRecordsList from '@/components/reconciliation/PaymentRecordsList'
 import EntitlementReconciliationModal from '@/components/reconciliation/EntitlementReconciliationModal'
 import { Banner } from '@/components/reconciliation/ui'
+import { isPaymentsEnabled } from '@/lib/featureFlags'
+import PaymentsDisabled from '@/components/payments/PaymentsDisabled'
 
 export default function PaymentRecordsPage() {
   const router = useRouter()
+  const enabled = isPaymentsEnabled()
   const [session, setSession] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
 
@@ -34,12 +37,19 @@ export default function PaymentRecordsPage() {
   const [activeEntitlementId, setActiveEntitlementId] = useState(null)
 
   useEffect(() => {
+    // Skip auth/session work entirely when the feature is disabled — the page
+    // short-circuits to the controlled unavailable view below.
+    if (!enabled) return
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) { router.replace('/login'); return }
       setSession(data.session)
       setAuthLoading(false)
     })
-  }, [router])
+  }, [router, enabled])
+
+  // Feature-flag guard: render a controlled unavailable page (no AppShell, no
+  // backend calls) when Payments is disabled in this environment.
+  if (!enabled) return <PaymentsDisabled />
 
   if (authLoading) {
     return (

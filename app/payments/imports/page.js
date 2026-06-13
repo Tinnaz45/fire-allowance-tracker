@@ -25,9 +25,12 @@ import CreateImportForm from '@/components/payslip/CreateImportForm'
 import ScreenshotUploadForm from '@/components/payslip/ScreenshotUploadForm'
 import ImportsList from '@/components/payslip/ImportsList'
 import ImportDetail from '@/components/payslip/ImportDetail'
+import { isPaymentsEnabled } from '@/lib/featureFlags'
+import PaymentsDisabled from '@/components/payments/PaymentsDisabled'
 
 export default function PayslipImportsPage() {
   const router = useRouter()
+  const enabled = isPaymentsEnabled()
   const [session, setSession] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
 
@@ -37,12 +40,19 @@ export default function PayslipImportsPage() {
   const [selectedId, setSelectedId] = useState(null)
 
   useEffect(() => {
+    // Skip auth/session work entirely when the feature is disabled — the page
+    // short-circuits to the controlled unavailable view below.
+    if (!enabled) return
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) { router.replace('/login'); return }
       setSession(data.session)
       setAuthLoading(false)
     })
-  }, [router])
+  }, [router, enabled])
+
+  // Feature-flag guard: render a controlled unavailable page (no AppShell, no
+  // backend calls) when Payments is disabled in this environment.
+  if (!enabled) return <PaymentsDisabled />
 
   if (authLoading) {
     return (

@@ -4,7 +4,10 @@
 // Single source of truth for all authenticated navigation.
 // Rendered inside AppShell. Never import this directly — use AppShell instead.
 //
-// Tabs:   Dashboard (/)  ·  Tax (/tax)  ·  Payments (/payments)  ·  Profile (/profile)  ·  Settings (/settings)
+// Tabs:   Dashboard (/)  ·  Tax (/tax)  ·  Payments (/payments)*  ·  Profile (/profile)  ·  Settings (/settings)
+//   * The Payments tab is shown only when the Payments feature flag is enabled
+//     (lib/featureFlags.js → isPaymentsEnabled). Hidden in PROD until the backend
+//     rollout completes; the routes themselves are independently guarded.
 //
 // Active-route logic:
 //   - '/'        → exact match only
@@ -16,6 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { usePathname, useRouter } from 'next/navigation'
+import { isPaymentsEnabled } from '@/lib/featureFlags'
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
@@ -90,6 +94,10 @@ export default function AppNav() {
   const pathname = usePathname()
   const router = useRouter()
 
+  // Hide the Payments tab unless its feature flag is enabled. SSR-safe (env-only),
+  // so server and client render the same tab set — no hydration mismatch.
+  const tabs = TABS.filter((tab) => tab.key !== 'payments' || isPaymentsEnabled())
+
   return (
     <>
       {/* Bottom nav bar — fixed, safe-area aware */}
@@ -111,7 +119,7 @@ export default function AppNav() {
           minHeight: '56px',
         }}
       >
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const active = tab.match(pathname)
           return (
             <button

@@ -32,6 +32,7 @@ import {
   resolveGroupPlatoon,
   resolveClaimStations,
   resolveGroupStations,
+  isOperationalContainerRow,
 } from '@/lib/claims/claimMeta'
 import {
   resolveEffectiveAmount,
@@ -230,20 +231,18 @@ function SubClaimGroupHeader({ stream, count, subtotal }) {
   )
 }
 
-// ─── Retain container hiding ───────────────────────────────────────────────────
-// Once retain entitlement children exist (Maint Stn N/N, meals), the retain
-// parent row is a pure grouping container — its dollars are already zeroed in
-// groupedView. Hide it so the card shows only meaningful entitlement rows.
-// This is display-only: groupedView (reconciliation, exports, persistence) keeps
-// the parent row intact.
-
-function isRetainContainerRow(claim, siblings) {
-  if (claim.claimType !== 'retain' || claim.calculation_inputs?.autoChild != null) return false
-  return siblings.some((c) => c.claimType === 'retain' && c.calculation_inputs?.autoChild != null)
-}
+// ─── Operational-container hiding ───────────────────────────────────────────────
+// Once entitlement children exist (Callback-Ops / Excess Travel / meal for
+// recalls; Maint Stn N/N / meals for retain), the parent operational row is a
+// pure grouping container — its dollars are already zeroed in groupedView. Hide
+// it so the card shows only the meaningful entitlement rows. This is display-only:
+// groupedView (reconciliation, exports, persistence) keeps the parent row intact.
+// The Standby/M&D parent carries its own autoChild slug, so it is never treated
+// as a container and stays visible. See lib/claims/claimMeta.js for the canonical
+// predicate (shared with the groupedView dollar dedupe).
 
 function toDisplayEntry(entry) {
-  const visible = entry.children.filter((c) => !isRetainContainerRow(c, entry.children))
+  const visible = entry.children.filter((c) => !isOperationalContainerRow(c, entry.children))
   if (visible.length === entry.children.length) return entry
   const totalCount = visible.length
   const paidCount  = visible.filter((c) => (c.payment_status || 'Pending').toLowerCase() === 'paid').length

@@ -35,12 +35,24 @@
 -- Idempotent: ON CONFLICT on the composite PK. Safe to replay.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
+-- ── Unit isolation (added 2026-06-14) ────────────────────────────────────────
+-- When this seed was first written, travel_matrix_cells held ONLY the km
+-- version, so an unconditional read was correct. After Phase 3 the table holds
+-- BOTH a km version and an hours version simultaneously (see migration 06).
+-- Reading unconditionally would insert decimal-HOURS values into distance_km —
+-- silent corruption (hours are >= 0 so they pass the CHECK). The JOIN to
+-- travel_matrix_versions + unit='km' filter keeps the km matrix km-only, exactly
+-- mirroring the unit='hours' guard migration 06 uses for the time matrix.
 insert into fat.station_distance_matrix (from_station_id, to_station_id, matrix_version, distance_km)
 select c.station_a_id, c.station_b_id, c.version_id::text, c.value
 from fat.travel_matrix_cells c
+join fat.travel_matrix_versions v on v.id = c.version_id
+where v.unit = 'km'
 union all
 select c.station_b_id, c.station_a_id, c.version_id::text, c.value
 from fat.travel_matrix_cells c
+join fat.travel_matrix_versions v on v.id = c.version_id
+where v.unit = 'km'
 on conflict (from_station_id, to_station_id, matrix_version) do nothing;
 
 -- ═══════════════════════════════════════════════════════════════════════════════

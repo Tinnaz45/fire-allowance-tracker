@@ -152,8 +152,9 @@ export default function ScreenshotUploadForm({ ownerId, onCreated }) {
         </div>
 
         <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: '#6b7280', lineHeight: 1.5 }}>
-          The image is stored privately (only you can view it). Extraction into payslip lines is not built yet —
-          the upload is tracked as an import that is ready for OCR when that lands.
+          The image is stored privately (only you can view it). Automatic extraction into payslip
+          lines runs only where an OCR provider is configured — until then, add the lines with
+          Manual entry above; your upload is saved and can be extracted later once OCR is enabled.
         </p>
 
         {error && <div style={{ marginTop: '14px' }}><Banner tone="error">{error}</Banner></div>}

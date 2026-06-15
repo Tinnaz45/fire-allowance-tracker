@@ -56,14 +56,39 @@ time** — a Vercel redeploy is required for a change to take effect):
 
 1. Apply `fat-parity` phases **3 → 4 → 5 → 6** to PROD (see
    `supabase/prod-rollout/fat-parity/README.md`), validating each phase.
-2. Confirm the PROD env (`SUPABASE_SERVICE_ROLE_KEY` = PROD key; OCR off or
-   `PAYSLIP_OCR_PROVIDER=stub` until a valid key + PII review).
+2. Confirm the PROD env (`SUPABASE_SERVICE_ROLE_KEY` = PROD key). OCR stays OFF
+   until a valid provider key + PII review (see *OCR availability* below) — the
+   feature works fully on manual entry without it.
 3. Set `NEXT_PUBLIC_PAYMENTS_ENABLED=true` for a canary, then broaden.
 4. Once stable, the env-default (DEV-ref) logic can remain; the explicit override is
    the canary/rollback lever.
 
+## OCR availability (separate from this flag)
+
+Automatic payslip-screenshot OCR is gated **independently** of `isPaymentsEnabled()`,
+by whether a real provider key is configured server-side — NOT by the feature flag.
+This prevents the deterministic **stub** extractor (which fabricates sample payslip
+lines) from ever reaching a user when no provider is set up (e.g. PROD has no
+`OPENAI_API_KEY`).
+
+- Single source of truth: **`lib/fat/services/payslipExtraction.js` →
+  `isRealOcrAvailable()` / `resolveExtractionAdapter()`**.
+- **No provider key** → `resolveExtractionAdapter()` returns `null` →
+  `POST /api/payslip/extract` returns **503 `ocr_unavailable`** and the **"Extract
+  lines" UI is hidden** (the page probes `GET /api/payslip/extract` →
+  `{ available }`). Manual entry, reconciliation, payment records, and screenshot
+  *storage* are unaffected.
+- **Provider key set** (`OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` with
+  `PAYSLIP_OCR_PROVIDER=anthropic`) → real OCR runs.
+- The stub is reachable only by explicit dev opt-in (`PAYSLIP_OCR_ALLOW_STUB`, never
+  honored in production) or by tests injecting it directly — it is never an automatic
+  fallback. So enabling the Payments flag in a key-less environment is safe: users
+  cannot generate fabricated lines.
+
 ## Related
 
 - `lib/featureFlags.js` — the resolver.
+- `lib/fat/services/payslipExtraction.js` — `isRealOcrAvailable` / `resolveExtractionAdapter`.
+- `app/api/payslip/extract/route.js` — 503 gate + `GET` availability probe.
 - `components/payments/PaymentsDisabled.js` — the controlled unavailable view.
 - `supabase/prod-rollout/fat-parity/README.md` — the backend rollout runbook.

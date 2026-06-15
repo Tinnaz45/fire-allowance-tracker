@@ -101,6 +101,18 @@ export async function POST(req) {
     return jsonError(400, 'bad_request', 'importId (string) is required.')
   }
 
+  // ── Hard availability gate (run BEFORE any work) ─────────────────────────────
+  // Only the real provider adapter (or, in an explicitly opted-in dev box, the stub)
+  // is acceptable here. When no real OCR provider is configured we return 503 and
+  // never run the deterministic stub — its lines are fabricated and must never reach
+  // a user (e.g. production has no provider key). Manual entry remains the supported
+  // path. This is the single non-bypassable guarantee, independent of the UI.
+  const adapter = resolveExtractionAdapter()
+  if (!adapter) {
+    return jsonError(503, 'ocr_unavailable',
+      'Automatic payslip OCR is not enabled in this environment. Enter the lines with Manual entry, or ask an administrator to configure an OCR provider.')
+  }
+
   // Per-request fat-schema client carrying the user's JWT → RLS enforces owner-only.
   const client = createClient(auth.url, auth.anonKey, {
     db: { schema: 'fat' },
@@ -108,11 +120,9 @@ export async function POST(req) {
     global: { headers: { Authorization: `Bearer ${auth.token}` } },
   })
 
-  // Choose the real provider adapter when configured, else the deterministic stub.
   // The real adapter needs the image bytes — download them owner-scoped from Storage
   // (the same JWT client; storage RLS pins the user's own '<uid>/' prefix). Bytes
   // and the provider key are handled SERVER-SIDE only.
-  const adapter = resolveExtractionAdapter()
   const loadBytes = async (imp) => {
     if (!imp?.file_ref) throw new Error('Import has no stored image (file_ref missing).')
     const { data, error } = await client.storage.from(SCREENSHOT_BUCKET).download(imp.file_ref)
@@ -133,9 +143,13 @@ export async function POST(req) {
   }
 }
 
+// Capability probe for the UI: is automatic OCR extraction available in this
+// environment? Lets the client hide the "Extract lines" action instead of offering
+// a button that would only ever return 503. No auth required — this reveals only
+// whether a provider is configured (a boolean), never any secret or user data.
 export async function GET() {
   return NextResponse.json(
-    { ok: false, code: 'method_not_allowed', message: 'POST { importId } with a Bearer token.' },
-    { status: 405 },
+    { ok: true, available: resolveExtractionAdapter() !== null },
+    { status: 200 },
   )
 }

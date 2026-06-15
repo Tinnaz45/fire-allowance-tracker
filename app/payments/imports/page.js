@@ -108,8 +108,8 @@ export default function PayslipImportsPage() {
             review, then confirm, reject, or supersede each line. Likely entitlement matches are
             <strong> suggested automatically</strong> with a confidence score, but you confirm every line —
             nothing is auto-confirmed. Confirming a line creates a payment record (and optionally links it to an
-            entitlement) that reconciles on the Payments page. Uploaded screenshots are <strong>stored and tracked</strong>,
-            ready for extraction — OCR itself is not built yet.
+            entitlement) that reconciles on the Payments page. Uploaded screenshots are <strong>stored and tracked</strong>;
+            automatic OCR extraction runs only where an OCR provider is configured — otherwise use Manual entry.
           </Banner>
 
           {/* Objective 1 — manual entry create */}

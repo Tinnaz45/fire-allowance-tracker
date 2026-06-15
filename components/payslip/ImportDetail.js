@@ -22,7 +22,7 @@ import { listPendingPayslip } from '@/lib/fat/services/reconciliationQueues'
 import { scoreImportLines } from '@/lib/fat/services/payslipMatcher'
 import { detectImportDuplicates, listConfirmedLineFingerprints } from '@/lib/fat/services/payslipDuplicates'
 import { getScreenshotSignedUrl } from '@/lib/fat/services/payslipUploads'
-import { requestExtraction } from '@/lib/payslip/extractClient'
+import { requestExtraction, getOcrAvailability } from '@/lib/payslip/extractClient'
 import { canTransitionImport, isImportTerminal, IMPORT_SOURCE } from '@/lib/fat/models/payslipImport'
 import {
   CARD_STYLE, SectionHeading, EmptyState, Banner, GHOST_BTN, PRIMARY_BTN, fmtDate, fmtDateTime,
@@ -72,21 +72,27 @@ export default function ImportDetail({ importId, ownerId, reloadToken, onChanged
   const [rematching, setRematching] = useState(false)
   const [rechecking, setRechecking] = useState(false)
   const [extracting, setExtracting] = useState(false)
+  // Whether automatic OCR extraction is available server-side (a real provider is
+  // configured). Defaults false so the Extract action stays hidden until proven
+  // available — fail-safe, and never surfaces the fabricating stub.
+  const [ocrAvailable, setOcrAvailable] = useState(false)
 
   const load = useCallback(async () => {
     if (!importId || !ownerId) return
     setLoading(true)
     setError(null)
     try {
-      const [impRow, lineRows, cand, confirmed] = await Promise.all([
+      const [impRow, lineRows, cand, confirmed, ocrOk] = await Promise.all([
         getImport(importId),
         listImportLines(importId),
         listPendingPayslip(ownerId),
         listConfirmedLineFingerprints(ownerId),
+        getOcrAvailability(),
       ])
       setImp(impRow)
       setLines(lineRows)
       setCandidates(cand)
+      setOcrAvailable(ocrOk)
       // fingerprint → an already-confirmed line that settled identical content.
       setConfirmedFps(new Map(confirmed.map((c) => [c.content_fingerprint, c])))
     } catch (err) {
@@ -132,10 +138,13 @@ export default function ImportDetail({ importId, ownerId, reloadToken, onChanged
   // resting at 'uploaded' until OCR lands. Suppress the line-oriented affordances.
   const isScreenshot = imp.source === IMPORT_SOURCE.PAYSLIP_SCREENSHOT
   const awaitingExtraction = isScreenshot && lines.length === 0
-  // Extraction runs the (deterministic stub) OCR adapter server-side, materializing
-  // lines and walking the import into the review pipeline. Only from a pre-extraction
-  // state (uploaded) or a re-parsable failure (failed) — the idempotency guard.
-  const canExtract = isScreenshot && ['uploaded', 'failed'].includes(imp.status)
+  // Extraction runs the real OCR adapter server-side, materializing lines and walking
+  // the import into the review pipeline. Only from a pre-extraction state (uploaded)
+  // or a re-parsable failure (failed) — the idempotency guard — AND only when a real
+  // OCR provider is configured (ocrAvailable). When unavailable the action is hidden
+  // and the route returns 503, so the fabricating stub never reaches the operator.
+  const inExtractableState = isScreenshot && ['uploaded', 'failed'].includes(imp.status)
+  const canExtract = inExtractableState && ocrAvailable
 
   const handleExtract = async () => {
     setError(null)
@@ -231,6 +240,15 @@ export default function ImportDetail({ importId, ownerId, reloadToken, onChanged
               </span>
             </div>
           )}
+          {inExtractableState && !ocrAvailable && (
+            <div style={{ marginTop: '12px' }}>
+              <Banner tone="info">
+                Automatic OCR extraction isn’t enabled in this environment. Your screenshot is
+                stored securely — add its lines with <strong>Manual entry</strong> for now, or
+                extract here once an OCR provider is configured.
+              </Banner>
+            </div>
+          )}
         </div>
       )}
 
@@ -286,8 +304,10 @@ export default function ImportDetail({ importId, ownerId, reloadToken, onChanged
         awaitingExtraction ? (
           <EmptyState>
             {imp.status === 'failed'
-              ? 'Extraction failed — see the error above. Use “Retry extraction” to run it again.'
-              : 'Awaiting extraction — the image is stored, but no lines have been read yet. Use “Extract lines” above to read it into reviewable lines.'}
+              ? `Extraction failed — see the error above.${ocrAvailable ? ' Use “Retry extraction” to run it again.' : ''}`
+              : ocrAvailable
+                ? 'Awaiting extraction — the image is stored, but no lines have been read yet. Use “Extract lines” above to read it into reviewable lines.'
+                : 'The image is stored securely. Automatic extraction isn’t enabled in this environment — add its lines with Manual entry above, or extract here once OCR is configured.'}
           </EmptyState>
         ) : (
           <EmptyState>This import has no lines.</EmptyState>

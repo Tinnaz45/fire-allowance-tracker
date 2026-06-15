@@ -29,7 +29,7 @@ const {
   ScreenshotOcrAdapter, normalizeOcrLine, parseModelJson, isOcrConfigured,
   OCR_PROVIDER, OCR_MODEL,
 } = await import('../lib/fat/adapters/screenshotOcrAdapter.js')
-const { runScreenshotExtraction, resolveExtractionAdapter } =
+const { runScreenshotExtraction, resolveExtractionAdapter, isStubFallbackAllowed } =
   await import('../lib/fat/services/payslipExtraction.js')
 const { createScreenshotImport, deleteScreenshotObject } =
   await import('../lib/fat/services/payslipUploads.js')
@@ -159,13 +159,30 @@ async function main() {
       runScreenshotExtraction({ importId: impM.id, ownerId: owner.id, adapter: junkAdapter, loadBytes: async () => new Uint8Array(png3) }, sb))
     check('malformed → failed', (await sb.from('payslip_imports').select('status').eq('id', impM.id).single()).data.status === 'failed')
 
-    // ── adapter selection: keyless DEV falls back to stub ───────────────────────
-    console.log('\nTEST: resolveExtractionAdapter selection')
+    // ── adapter selection: NEW contract — never auto-fall-back to the stub ──────
+    // real when configured; NULL when unconfigured (route → 503); stub ONLY via an
+    // explicit dev opt-in. Guarantees fabricated lines can't reach a user.
+    console.log('\nTEST: resolveExtractionAdapter selection (no auto stub)')
     const selected = resolveExtractionAdapter()
-    check('selector returns real adapter when configured, else stub',
-      (isOcrConfigured() && selected.name === 'screenshot_ocr') || (!isOcrConfigured() && selected.name === 'stub_screenshot_ocr'),
-      `configured=${isOcrConfigured()} selected=${selected.name}`)
-    check('stub remains available as the keyless fallback', stubScreenshotOcrAdapter.name === 'stub_screenshot_ocr')
+    check('selector: real when configured, else null unless stub explicitly allowed',
+      (isOcrConfigured() && selected?.name === 'screenshot_ocr')
+      || (!isOcrConfigured() && isStubFallbackAllowed() && selected?.name === 'stub_screenshot_ocr')
+      || (!isOcrConfigured() && !isStubFallbackAllowed() && selected === null),
+      `configured=${isOcrConfigured()} stubOptIn=${isStubFallbackAllowed()} selected=${selected?.name ?? 'null'}`)
+
+    // Drive both unconfigured branches deterministically by toggling the env.
+    const savedKey = process.env.OPENAI_API_KEY
+    const savedStub = process.env.PAYSLIP_OCR_ALLOW_STUB
+    delete process.env.OPENAI_API_KEY
+    delete process.env.PAYSLIP_OCR_ALLOW_STUB
+    check('unconfigured + no opt-in → adapter is NULL (route returns 503, no stub)',
+      resolveExtractionAdapter() === null)
+    process.env.PAYSLIP_OCR_ALLOW_STUB = 'true'
+    check('unconfigured + explicit dev opt-in → stub permitted (dev/test only)',
+      resolveExtractionAdapter()?.name === 'stub_screenshot_ocr')
+    if (savedKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = savedKey
+    if (savedStub === undefined) delete process.env.PAYSLIP_OCR_ALLOW_STUB; else process.env.PAYSLIP_OCR_ALLOW_STUB = savedStub
+    check('stub adapter still exists for explicit/test use', stubScreenshotOcrAdapter.name === 'stub_screenshot_ocr')
 
     // ── LIVE wire proof (best-effort; does NOT fail the suite) ───────────────────
     console.log('\nTEST: live provider wire (best-effort — proves request reaches provider)')

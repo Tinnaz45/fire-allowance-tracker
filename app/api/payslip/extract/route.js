@@ -23,6 +23,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { runScreenshotExtraction, ExtractionStateError, resolveExtractionAdapter } from '@/lib/fat/services/payslipExtraction'
 import { SCREENSHOT_BUCKET } from '@/lib/fat/services/payslipUploads'
+import { isPaymentsEnabled } from '@/lib/featureFlags'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -82,6 +83,14 @@ function statusForCode(code) {
 }
 
 export async function POST(req) {
+  // Feature-flag gate (audit P1-5): mirror the Payments UI kill-switch. When
+  // Payments is disabled in this environment the route is unavailable BEFORE any
+  // auth/work — exactly as the /payments pages short-circuit to PaymentsDisabled.
+  if (!isPaymentsEnabled()) {
+    return jsonError(503, 'payments_disabled',
+      'Payments is not enabled in this environment.')
+  }
+
   const auth = await authenticate(req)
   if (!auth.ok) return jsonError(auth.status, auth.code, 'Not authenticated.')
 
@@ -148,6 +157,11 @@ export async function POST(req) {
 // a button that would only ever return 503. No auth required — this reveals only
 // whether a provider is configured (a boolean), never any secret or user data.
 export async function GET() {
+  // When Payments is disabled, the capability probe reports unavailable (P1-5) so
+  // the UI hides the Extract action — consistent with the POST gate above.
+  if (!isPaymentsEnabled()) {
+    return NextResponse.json({ ok: true, available: false }, { status: 200 })
+  }
   return NextResponse.json(
     { ok: true, available: resolveExtractionAdapter() !== null },
     { status: 200 },

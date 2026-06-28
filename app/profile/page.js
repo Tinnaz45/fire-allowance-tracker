@@ -11,7 +11,7 @@ import {
   getHomeAddress,
   saveHomeAddress,
 } from '@/lib/distance/addressCache'
-import { composeStationLabel } from '@/lib/distance/stationParser'
+import { displayLabelForStation, stationById } from '@/lib/distance/stationParser'
 import AddressAutocomplete from '@/components/profile/AddressAutocomplete'
 import PlatoonPicker from '@/components/profile/PlatoonPicker'
 import TravelBaselineCard from '@/components/profile/TravelBaselineCard'
@@ -163,11 +163,11 @@ export default function ProfilePage() {
     if (!homeAddress.trim()) { setErrorMsg('Home address is required for travel calculations.'); return }
     setSaving(true)
     try {
-      // stationName is guaranteed bare (sourced from fat.stations.name on
-      // hydration and on every picker click), so composeStationLabel just
-      // prepends "FS{id} - ". The DB column is a write-only cache —
-      // hydration ignores it and re-derives the name from fat.stations.
-      const stationLabel = composeStationLabel(stationId, stationName)
+      // rostered_station_label is a write-only cache — hydration ignores it and
+      // re-derives the label from fat.stations. We write the same human display
+      // label the UI shows (fire → "FS45 - Brooklyn", non-fire → name only).
+      const stationLabel =
+        displayLabelForStation(stationById(stationId, stations) || { id: stationId, name: stationName })
 
       // fat.profiles is FAT-owned authoritative identity (mirrors mica.profiles).
       // email is NOT NULL and sourced from auth.users; include it on every
@@ -252,7 +252,9 @@ export default function ProfilePage() {
   }
   if (!session) return null
 
-  const activeStationLabel = composeStationLabel(stationId, stationName) || null
+  const activeStationLabel = stationId
+    ? (displayLabelForStation(stationById(stationId, stations) || { id: stationId, name: stationName }) || null)
+    : null
   const validDistance = activeStationLabel && typeof homeDistKm === 'number' && Number.isFinite(homeDistKm) && homeDistKm > 0 ? homeDistKm : null
 
   return (
@@ -318,7 +320,9 @@ export default function ProfilePage() {
                         <button key={s.id} type="button"
                           onClick={() => { setStationId(String(s.id)); setStationName(s.name); setStationSearch(''); setShowStationPicker(false) }}
                           style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', borderBottom: '1px solid #1f1f1f', color: '#e5e7eb', fontSize: '0.875rem', cursor: 'pointer' }}>
-                          <span style={{ fontWeight: 700, color: '#fca5a5' }}>FS{s.id}</span> &mdash; {s.name}
+                          {s.abbreviation
+                            ? <><span style={{ fontWeight: 700, color: '#fca5a5' }}>{s.abbreviation}</span> &mdash; {s.name}</>
+                            : s.name}
                         </button>
                       ))
                     )}

@@ -25,8 +25,8 @@ import StationPicker from '@/components/claims/StationPicker'
 import TimeInput24 from '@/components/claims/TimeInput24'
 import { resolveOperationalPlatoon } from '@/lib/platoon/resolveOperationalPlatoon'
 import {
-  composeStationLabel,
-  getExplicitlyResolvedStation,
+  stationById,
+  displayLabelForStation,
 } from '@/lib/distance/stationParser'
 import {
   calcRecallClaim,
@@ -83,6 +83,7 @@ const HELP_STYLE = { marginTop: '4px', fontSize: '0.74rem', color: '#6b7280' }
 // verbatim.
 
 function RosteredStationField({ id, value, onChange, stations, profile, help }) {
+  const profileStation = stationById(profile?.stationId, stations)
   return (
     <div style={FIELD}>
       <label style={LABEL_STYLE} htmlFor={id}>Rostered Station</label>
@@ -91,9 +92,9 @@ function RosteredStationField({ id, value, onChange, stations, profile, help }) 
         value={value || ''}
         onChange={onChange}
         stations={stations}
-        placeholder={profile?.stationLabel || 'Search by FS number or name (e.g. 45 or Brooklyn)'}
+        placeholder={profileStation?.label || 'Search by FS number or name (e.g. 45 or Brooklyn)'}
         ariaLabel="Rostered station"
-        profileLabel={profile?.stationLabel || ''}
+        profileStationId={profile?.stationId ?? ''}
       />
       <p style={HELP_STYLE}>{help || 'Auto-filled from your profile. Edit if different for this claim.'}</p>
     </div>
@@ -105,7 +106,8 @@ function RosteredStationField({ id, value, onChange, stations, profile, help }) 
 // while staying fully editable: the shared StationPicker surfaces a "From
 // Profile" / "Custom" badge and Change workflow exactly like Recall/Standby.
 // When the user overrides the station the badge flips to "Custom".
-function OperationalStationField({ id, label, value, onChange, stations, profileLabel, help }) {
+function OperationalStationField({ id, label, value, onChange, stations, profileStationId, help }) {
+  const profileStation = stationById(profileStationId, stations)
   return (
     <div style={FIELD}>
       <label style={LABEL_STYLE} htmlFor={id}>{label}</label>
@@ -114,9 +116,9 @@ function OperationalStationField({ id, label, value, onChange, stations, profile
         value={value || ''}
         onChange={onChange}
         stations={stations}
-        placeholder={profileLabel || 'Search by FS number or name (e.g. 43 or Deer Park)'}
+        placeholder={profileStation?.label || 'Search by FS number or name (e.g. 43 or Deer Park)'}
         ariaLabel={label}
-        profileLabel={profileLabel || ''}
+        profileStationId={profileStationId ?? ''}
       />
       {help && <p style={HELP_STYLE}>{help}</p>}
     </div>
@@ -268,24 +270,14 @@ function AdjustedAmountField({ calculatedAmount, adjustedAmount, onChange }) {
 // ─── Sub-form: Recall ─────────────────────────────────────────────────────────
 
 function RecallInputs({ values, onChange, date, profile, profileLoading, userId, stations, onHomeLegMeta, onStnLegMeta, entitlement }) {
-  // Station resolution is gated on EXPLICIT selection only — typing a fuzzy
-  // fragment like "43" must not be treated as a confirmed pick. Downstream
-  // Google KM / FRV-matrix lookups all read from these gated values.
-  const explicitRosterStation = getExplicitlyResolvedStation(values.rosteredStn, stations)
-  const recallStation         = getExplicitlyResolvedStation(values.recallStn, stations)
-
-  const profileFallbackStation = profile?.stationId
-    ? {
-        id:           profile.stationId,
-        name:         profile.stationName || null,
-        abbreviation: `FS${profile.stationId}`,
-        label:        profile.stationLabel || `FS${profile.stationId}`,
-      }
-    : null
+  // Station identity is carried explicitly: form fields hold the station id, and
+  // we resolve the underlying record by id (never by parsing display text).
+  const explicitRosterStation = stationById(values.rosteredStn, stations)
+  const recallStation         = stationById(values.recallStn, stations)
 
   // Lookup-side station: explicit selection wins; otherwise fall back to the
-  // profile so the home-leg estimate still runs.
-  const rosterStationForLookup = explicitRosterStation || profileFallbackStation
+  // profile rostered station so the home-leg estimate still runs.
+  const rosterStationForLookup = explicitRosterStation || stationById(profile?.stationId, stations)
 
   const notified = !!values.notified
   const shiftSelected = values.shift === 'Day' || values.shift === 'Night'
@@ -579,25 +571,14 @@ function StandbyInputs({ values, onChange, date, nightMealEligible, profile, use
   // badge + Change workflow), gated to explicit selection. The resolved value
   // feeds the auto-distance origin; an explicit pick wins, otherwise we fall
   // back to the profile so the lookup still runs when the user leaves it as-is.
-  const explicitRosterStation = getExplicitlyResolvedStation(values.rosteredStn, stations)
+  const explicitRosterStation = stationById(values.rosteredStn, stations)
 
-  const profileFallbackStation = profile?.stationId
-    ? {
-        id:           profile.stationId,
-        name:         profile.stationName || null,
-        abbreviation: `FS${profile.stationId}`,
-        label:        profile.stationLabel || `FS${profile.stationId}`,
-      }
-    : null
+  const rosterStationForLookup = explicitRosterStation || stationById(profile?.stationId, stations)
 
-  const rosterStationForLookup = explicitRosterStation || profileFallbackStation
-
-  // Only treat the standby station as resolved once the user has explicitly
-  // picked an option from the picker (value === canonical label). The
-  // picker never writes raw keystrokes to `value`, so a fuzzy fragment
-  // like "23" can never prematurely trigger the downstream auto-distance
-  // flow.
-  const standbyStation = getExplicitlyResolvedStation(values.standbyStn, stations)
+  // The standby station is resolved by explicit id. The picker only ever writes
+  // a committed station id to `value` (never raw keystrokes), so a fuzzy
+  // fragment can't prematurely trigger the downstream auto-distance flow.
+  const standbyStation = stationById(values.standbyStn, stations)
 
   const isMD = values.standbyType === 'M&D'
 
@@ -701,7 +682,7 @@ function StandbyInputs({ values, onChange, date, nightMealEligible, profile, use
 // 'Delayed' by the virtual claimType resolution in ClaimsContext/addClaim.
 
 function SpoiltInputs({ values, onChange, date, claimType, stations, profile }) {
-  const operationalIsDefault = !!profile?.stationLabel && values.operationalStn === profile.stationLabel
+  const operationalIsDefault = profile?.stationId != null && String(values.operationalStn) === String(profile.stationId)
   const mealWin = getMealWindow(values.shift)
   // Guard with || '' — on claim-type switch this renders once before the
   // fields-reset effect seeds the new defaults, so the key can be undefined.
@@ -725,7 +706,7 @@ function SpoiltInputs({ values, onChange, date, claimType, stations, profile }) 
         value={values.operationalStn}
         onChange={(text) => onChange('operationalStn', text)}
         stations={stations}
-        profileLabel={profile?.stationLabel || ''}
+        profileStationId={profile?.stationId ?? ''}
         help={
           operationalIsDefault
             ? 'Defaulted from your rostered station. Change if this meal occurred elsewhere.'
@@ -889,19 +870,19 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       }
 
       if (ext) {
-        // Single canonical shape: (station_id, bare name from fat.stations).
-        // rostered_station_label is a write-only cache and is never read
-        // here — so a poisoned label can never round-trip through state.
+        // Identity is the station id; the display label is derived from the
+        // loaded stations list on demand (displayLabelForStation), never stored
+        // here. rostered_station_label remains a write-only cache and is never
+        // read into state, so a poisoned label can't round-trip.
         setProfile({
           stationId:    ext.station_id,
           stationName,
-          stationLabel: composeStationLabel(ext.station_id, stationName),
           homeDistKm:   ext.home_dist_km || 0,
           homeAddress:  ext.home_address || '',
           platoon:      ext.platoon || '',
         })
       } else {
-        setProfile({ stationId: null, stationName: '', stationLabel: '', homeDistKm: 0, homeAddress: '', platoon: '' })
+        setProfile({ stationId: null, stationName: '', homeDistKm: 0, homeAddress: '', platoon: '' })
       }
       setProfileLoading(false)
     })()
@@ -934,23 +915,26 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
   // regardless of claim type switch, and the user can still change it manually.
   useEffect(() => {
     const defaults = { ...DEFAULTS[claimType] }
-    if (claimType === 'recalls' && profile?.stationLabel) {
-      defaults.rosteredStn = profile.stationLabel
+    // Station fields carry the explicit station id. Pre-fill the rostered /
+    // operational station from the profile's rostered station id.
+    const profileStnId = profile?.stationId != null ? String(profile.stationId) : ''
+    if (claimType === 'recalls' && profileStnId) {
+      defaults.rosteredStn = profileStnId
       defaults.distHomeKm  = profile.homeDistKm ? String(profile.homeDistKm) : ''
     }
     // Standby + M&D reuse the Recall rostered-station pattern: pre-fill the
     // rostered station from the profile so the From Profile badge shows and the
     // auto-distance origin is ready without forcing the user to re-pick it.
-    if ((claimType === 'standby' || claimType === 'md') && profile?.stationLabel) {
-      defaults.rosteredStn = profile.stationLabel
+    if ((claimType === 'standby' || claimType === 'md') && profileStnId) {
+      defaults.rosteredStn = profileStnId
     }
     // Spoilt + Delayed meal claims auto-fill the Operational Station from the
     // rostered station so the operator never re-picks the same station. It stays
     // fully editable (StationPicker shows From Profile / Custom + Change), and
     // because this effect re-runs when `profile` changes the default tracks the
     // user's rostered station until they manually override it for this claim.
-    if ((claimType === 'spoilt' || claimType === 'delayed_meal') && profile?.stationLabel) {
-      defaults.operationalStn = profile.stationLabel
+    if ((claimType === 'spoilt' || claimType === 'delayed_meal') && profileStnId) {
+      defaults.operationalStn = profileStnId
     }
     setFields(defaults)
     setBreakdown(null)
@@ -1000,6 +984,15 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
 
   const handleFieldChange = (key, value) => setFields((prev) => ({ ...prev, [key]: value }))
 
+  // Station fields hold an explicit id; resolve the human display label (fire →
+  // "FS45 - Brooklyn", non-fire → "Spring Street") for calc breakdowns + audit.
+  const stationLabelFor = (v) => displayLabelForStation(stationById(v, stations))
+  const stationIdOrNull = (v) => {
+    if (v == null || v === '') return null
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+
   const handleShowCalc = () => {
     const num = (v) => Number(v) || 0
     let lines = []
@@ -1008,7 +1001,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         distHomeKm: num(fields.distHomeKm), distStnKm: num(fields.distStnKm),
         shift: fields.shift || null, notified: !!fields.notified,
         arrivalTime: fields.arrivalTime, bookedOffTime: fields.bookedOffTime || null,
-      }, rates, { rosterStation: fields.rosteredStn || 'Rostered Stn', recallStation: fields.recallStn || 'Recall Stn' })
+      }, rates, { rosterStation: stationLabelFor(fields.rosteredStn) || 'Rostered Stn', recallStation: stationLabelFor(fields.recallStn) || 'Recall Stn' })
     } else if (claimType === 'standby' || claimType === 'md') {
       lines = buildStandbyCalcLines({
         distKm: num(fields.distKm), standbyType: fields.standbyType,
@@ -1071,7 +1064,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
     // the rostered station, so this only fires if the operator explicitly
     // cleared it without picking a replacement.
     if (claimType === 'spoilt' || claimType === 'delayed_meal') {
-      if (!getExplicitlyResolvedStation(fields.operationalStn, stations)) {
+      if (!stationById(fields.operationalStn, stations)) {
         setError('Operational Station is required. Pick the station where the meal occurred.'); return
       }
       if (!/^\d{5}$/.test(fields.firecallNumber || '')) {
@@ -1099,7 +1092,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           arrivalTime: fields.arrivalTime, bookedOffTime: fields.bookedOffTime || null,
         },
         rates,
-        { rosterStation: fields.rosteredStn, recallStation: fields.recallStn }
+        { rosterStation: stationLabelFor(fields.rosteredStn), recallStation: stationLabelFor(fields.recallStn) }
       )
     } else if (claimType === 'standby' || claimType === 'md') {
       calcLines = buildStandbyCalcLines(
@@ -1140,6 +1133,23 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         ? { standby: standbyTravelMeta }
         : null
 
+    // Map the explicit station ids held in form state to the persistence
+    // contract: the *Stn fields become human-readable display labels for the
+    // audit columns + calc snapshot (claim history reads these directly), while
+    // dedicated *StnId fields carry the explicit identity the canonical bridge
+    // resolves against fat.stations — no id is ever parsed back out of a label.
+    const submitFields = {
+      ...fields,
+      rosteredStn:      stationLabelFor(fields.rosteredStn),
+      recallStn:        stationLabelFor(fields.recallStn),
+      standbyStn:       stationLabelFor(fields.standbyStn),
+      operationalStn:   stationLabelFor(fields.operationalStn),
+      rosteredStnId:    stationIdOrNull(fields.rosteredStn),
+      recallStnId:      stationIdOrNull(fields.recallStn),
+      standbyStnId:     stationIdOrNull(fields.standbyStn),
+      operationalStnId: stationIdOrNull(fields.operationalStn),
+    }
+
     setSubmitting(true)
     try {
       await addClaim({
@@ -1147,7 +1157,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
         claimType,
         date,
         breakdown: enrichedBreakdown,
-        fields,
+        fields: submitFields,
         rates,
         routingMeta,
         financialYearId: financialYearId || null,

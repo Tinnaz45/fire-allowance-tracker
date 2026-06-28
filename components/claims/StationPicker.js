@@ -9,21 +9,23 @@
 //     the field is active — there is no invisible fuzzy-resolve path.
 //   - Selection happens by an explicit button click; that click is the only
 //     thing that mutates `value`.
-//   - When `value` matches a canonical "FS{id} - {name}" label exactly, a
-//     badge sits above the search input to confirm the current selection.
+//   - When `value` resolves to a station record, a badge sits above the search
+//     input to confirm the current selection.
 //
-// External API matches the legacy text-input contract used by ClaimForm:
-//   props.value     -> canonical label string ('' when nothing picked)
-//   props.onChange  -> called with the canonical label on selection or '' on
+// Identity is EXPLICIT — the picker speaks station ids, never display text:
+//   props.value     -> station id as a string ('' when nothing picked)
+//   props.onChange  -> called with the station id string on selection or '' on
 //                      clear. NEVER called from raw keystrokes — the search
-//                      input is internal state only.
+//                      input is internal state only. The visible label is
+//                      derived from the resolved record (displayLabelForStation),
+//                      so non-fire locations show their name only and nothing
+//                      ever parses an id back out of the label.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useMemo, useRef, useState, useEffect, useId } from 'react'
 import {
-  parseAndResolve,
-  getExplicitlyResolvedStation,
-  labelForStation,
+  stationById,
+  displayLabelForStation,
 } from '@/lib/distance/stationParser'
 
 const S = {
@@ -90,8 +92,10 @@ function filterStations(query, stations) {
   return stations.filter((s) => {
     const id   = String(s.id)
     const name = (s.name || '').toLowerCase()
-    const abbr = (s.abbreviation || `fs${s.id}`).toLowerCase()
-    return id.includes(q) || name.includes(q) || abbr.includes(q)
+    // Match the real abbreviation only — no synthetic "fs{id}" so a non-fire
+    // location can never be found by a fabricated FS number.
+    const abbr = (s.abbreviation || '').toLowerCase()
+    return id.includes(q) || name.includes(q) || (abbr && abbr.includes(q))
   })
 }
 
@@ -102,12 +106,12 @@ export default function StationPicker({
   stations,
   placeholder,
   ariaLabel,
-  // Optional canonical label that originated from the user's profile (e.g.
-  // their rostered station). When provided AND the current `value` matches
-  // it, the badge labels the selection "From Profile"; once the user picks a
-  // different station the badge flips to "Custom". For free-text pickers with
-  // no profile default (recall stn, standby stn) leave this undefined.
-  profileLabel,
+  // Optional station id that originated from the user's profile (e.g. their
+  // rostered station). When provided AND the current `value` equals it, the
+  // badge labels the selection "From Profile"; once the user picks a different
+  // station the badge flips to "Custom". For pickers with no profile default
+  // (recall stn, standby stn) leave this undefined.
+  profileStationId,
 }) {
   const [searchText, setSearchText]             = useState('')
   const [showDropdown, setShowDropdown]         = useState(false)
@@ -120,21 +124,12 @@ export default function StationPicker({
   const listId   = `${baseId}-list`
   const optionId = (i) => `${listId}-opt-${i}`
 
-  // The currently selected canonical station is derived from `value`. We only
-  // treat it as a real selection when value matches the canonical label
-  // exactly — same rule the downstream auto-distance lookups use.
+  // The currently selected station is resolved by EXPLICIT id from `value`
+  // against the loaded stations list — no display-text parsing. Resolves to
+  // null while the list is still loading or when nothing is picked.
   const selected = useMemo(
-    () => getExplicitlyResolvedStation(value, stations),
+    () => stationById(value, stations),
     [value, stations],
-  )
-
-  // If the parent provides a non-canonical `value` (e.g. a stale legacy
-  // string), still expose its best-effort resolution so it can be promoted
-  // to a real selection without forcing the user to retype. This never
-  // upgrades `value` on its own — the user has to click.
-  const looseResolved = useMemo(
-    () => (!selected && value ? parseAndResolve(value, stations) : null),
-    [selected, value, stations],
   )
 
   const filtered = useMemo(
@@ -174,7 +169,7 @@ export default function StationPicker({
 
   function commit(station) {
     if (!station) return
-    onChange(labelForStation(station))
+    onChange(String(station.id))
     setSearchText('')
     setShowDropdown(false)
     setHighlightedIndex(0)
@@ -220,14 +215,13 @@ export default function StationPicker({
   //   2. No station selected → just the search field; dropdown opens when
   //      the user types.
   const showingSelectionBadge = !!selected
-  const showingLooseHint = !selected && !!looseResolved
 
-  // Provenance tag: only meaningful when a profileLabel was supplied AND
+  // Provenance tag: only meaningful when a profileStationId was supplied AND
   // there is a committed selection. Match → auto-populated; mismatch → user
-  // picked something else. With no profileLabel (recall/standby pickers) we
+  // picked something else. With no profileStationId (recall/standby pickers) we
   // suppress the tag entirely so the badge stays clean.
-  const provenance = (showingSelectionBadge && profileLabel)
-    ? (value === profileLabel ? 'From Profile' : 'Custom')
+  const provenance = (showingSelectionBadge && profileStationId != null && profileStationId !== '')
+    ? (String(value) === String(profileStationId) ? 'From Profile' : 'Custom')
     : null
 
   const activeOptionId = (showDropdown && searchText && filtered.length > 0)
@@ -238,7 +232,7 @@ export default function StationPicker({
     <div ref={wrapRef} style={S.wrap} data-station-picker="new">
       {showingSelectionBadge && (
         <div style={S.badge}>
-          <span>{selected.label || labelForStation(selected)}</span>
+          <span>{selected.label || displayLabelForStation(selected)}</span>
           {provenance && <span style={S.badgeSource}>{provenance}</span>}
           <span style={S.badgeSep}>·</span>
           <button
@@ -274,23 +268,6 @@ export default function StationPicker({
         style={S.input}
       />
 
-      {showingLooseHint && (
-        <button
-          type="button"
-          onClick={() => commit(looseResolved)}
-          style={{
-            marginTop: '6px', padding: '6px 10px',
-            background: 'rgba(251,191,36,0.08)',
-            border: '1px solid rgba(251,191,36,0.3)',
-            borderRadius: '6px',
-            fontSize: '0.78rem', color: '#fbbf24',
-            cursor: 'pointer', display: 'inline-block',
-          }}
-        >
-          Use “{looseResolved.label || labelForStation(looseResolved)}”
-        </button>
-      )}
-
       {showDropdown && searchText && (
         <div ref={listRef} id={listId} role="listbox" aria-label="Stations" style={S.dropdown}>
           {filtered.length === 0 ? (
@@ -323,8 +300,9 @@ export default function StationPicker({
                   onMouseEnter={() => setHighlightedIndex(i)}
                   style={optionStyle}
                 >
-                  <span style={S.optionAbbr}>{s.abbreviation || `FS${s.id}`}</span>
-                  — {s.name || '—'}
+                  {s.abbreviation
+                    ? <><span style={S.optionAbbr}>{s.abbreviation}</span>— {s.name || '—'}</>
+                    : (s.name || '—')}
                 </button>
               )
             })

@@ -8,10 +8,13 @@
 -- station row — no special-case logic anywhere in the app. Selectors query
 -- `fat.stations where is_active = true`, so this insert is all that's required.
 --
--- The abbreviation follows the canonical "FS{id}" label convention used by every
--- other row. That convention is what lib/distance/stationParser.js round-trips
--- on (the label embeds a numeric id), so keeping it guarantees the picker's
--- explicit-selection resolution behaves identically to existing stations.
+-- Spring Street is NOT a fire station, so its abbreviation is NULL. The app
+-- treats abbreviation as the "is this a numbered fire station?" signal: fire
+-- stations (abbreviation "FS45") display as "FS45 - Brooklyn"; a NULL
+-- abbreviation displays the bare name ("Spring Street") with no fabricated FS
+-- number. Station identity is carried by the explicit numeric id (NOT parsed
+-- from the visible label), so a NULL abbreviation does not affect selection,
+-- persistence, distance or entitlement resolution.
 --
 -- It has no station_distance_matrix / station_time_matrix cells. Matrix lookups
 -- for absent pairs already return null (the matrix is sparse, ~41% dense), so
@@ -24,7 +27,7 @@
 insert into fat.stations
   (id, name, abbreviation, district, region, street_address, suburb, postcode, is_active)
 values
-  (100, 'Spring Street', 'FS100', 'Central', null, '215 Spring Street', 'Melbourne', '3000', true)
+  (100, 'Spring Street', null, 'Central', null, '215 Spring Street', 'Melbourne', '3000', true)
 on conflict (id) do update set
   name           = excluded.name,
   abbreviation   = excluded.abbreviation,

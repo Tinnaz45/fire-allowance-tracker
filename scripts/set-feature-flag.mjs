@@ -25,7 +25,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 
-import { setUserFeature, clearUserFeature } from '../lib/featureFlags.js'
+import { setUserFeature, clearUserFeature } from '../lib/features/index.js'
 
 
 // ── CLI parsing ─────────────────────────────────────────────────────────────

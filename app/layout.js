@@ -1,4 +1,5 @@
 import './globals.css'
+import { ProfileProvider } from '@/lib/profile/ProfileContext'
 import { ClaimsProvider } from '@/lib/claims/ClaimsContext'
 import { RatesProvider } from '@/lib/calculations/RatesContext'
 import { FinancialYearProvider } from '@/lib/fy/FinancialYearContext'
@@ -42,11 +43,13 @@ export default function RootLayout({ children }) {
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body>
-        <RatesProvider>
-          <FinancialYearProvider>
-            <ClaimsProvider>{children}</ClaimsProvider>
-          </FinancialYearProvider>
-        </RatesProvider>
+        <ProfileProvider>
+          <RatesProvider>
+            <FinancialYearProvider>
+              <ClaimsProvider>{children}</ClaimsProvider>
+            </FinancialYearProvider>
+          </RatesProvider>
+        </ProfileProvider>
       </body>
     </html>
   )

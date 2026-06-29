@@ -1,4 +1,4 @@
-// Unit tests for the per-user feature layer in lib/featureFlags.js:
+// Unit tests for the per-user feature layer in lib/features/:
 //   getUserFeatures / setUserFeature / clearUserFeature / hasFeature / featureEnabled
 //
 // Backed by the normalized fat.user_feature_flags model ("row presence IS the
@@ -15,7 +15,8 @@ import {
   clearUserFeature,
   hasFeature,
   featureEnabled,
-} from '../lib/featureFlags.js'
+} from '../lib/features/index.js'
+import { isPaymentsEnabled } from '../lib/featureFlags.js'
 
 // ── In-memory fake Supabase client ───────────────────────────────────────────
 // Models one table (user_feature_flags) as an array of rows. The builder is a
@@ -189,6 +190,58 @@ await (async function run() {
     process.env.NODE_ENV = 'development'
     expect('hasFeature: no auth user → false', await hasFeature('payments', { client: anon }), false)
   }
+
+  // ── Integration gate matrix ─────────────────────────────────────────────────
+  // The exact truth table the integration must satisfy, exercised against BOTH
+  // call sites that gate Payments:
+  //   • UI gate   — isPaymentsEnabled() && featureEnabled(flags,'payments')
+  //                 (AppNav / payments pages read flags from the shared provider)
+  //   • Server    — hasFeature('payments', { userId, client })  (extract route)
+  // Cases: global OFF; global ON + feature absent; global ON + feature true;
+  // global ON + feature "false" (which, in the row-presence model, == absent).
+  const GLOBAL_ON  = () => { process.env.NEXT_PUBLIC_PAYMENTS_ENABLED = 'on' }
+  const GLOBAL_OFF = () => { process.env.NEXT_PUBLIC_PAYMENTS_ENABLED = 'off' }
+
+  // ---- UI gate (synchronous: global flag AND loaded featureFlags object) -------
+  {
+    GLOBAL_OFF()
+    expect('UI: global OFF + flag true → hidden',
+      isPaymentsEnabled() && featureEnabled({ payments: true }, 'payments'), false)
+
+    GLOBAL_ON()
+    expect('UI: global ON + feature absent → hidden',
+      isPaymentsEnabled() && featureEnabled({}, 'payments'), false)
+    expect('UI: global ON + feature true → visible',
+      isPaymentsEnabled() && featureEnabled({ payments: true }, 'payments'), true)
+    expect('UI: global ON + feature false → hidden',
+      isPaymentsEnabled() && featureEnabled({ payments: false }, 'payments'), false)
+  }
+
+  // ---- Server gate (async hasFeature with a pre-resolved userId) ---------------
+  // userId is supplied (as the extract route does post-auth), so the check needs
+  // NO auth.getUser — proven by using an anonymous client (user: null).
+  {
+    const store = makeStore()
+    const anon = makeClient(store, null)
+    await setUserFeature(USER_A, 'payments', { client: anon })  // grant USER_A
+
+    GLOBAL_OFF()
+    expect('server: global OFF + row → denied',
+      await hasFeature('payments', { userId: USER_A, client: anon }), false)
+
+    GLOBAL_ON()
+    expect('server: global ON + feature absent (other user) → denied',
+      await hasFeature('payments', { userId: USER_B, client: anon }), false)
+    expect('server: global ON + feature true → allowed (no auth.getUser needed)',
+      await hasFeature('payments', { userId: USER_A, client: anon }), true)
+
+    // "feature false" == row removed (row-presence model) → denied.
+    await clearUserFeature(USER_A, 'payments', { client: anon })
+    expect('server: global ON + feature false/absent → denied',
+      await hasFeature('payments', { userId: USER_A, client: anon }), false)
+  }
+
+  delete process.env.NEXT_PUBLIC_PAYMENTS_ENABLED
 
   console.log()
   console.log(`Total: ${pass + fail}   Pass: ${pass}   Fail: ${fail}`)

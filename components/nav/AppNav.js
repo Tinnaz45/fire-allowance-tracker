@@ -5,9 +5,12 @@
 // Rendered inside AppShell. Never import this directly — use AppShell instead.
 //
 // Tabs:   Dashboard (/)  ·  Tax (/tax)  ·  Payments (/payments)*  ·  Profile (/profile)  ·  Settings (/settings)
-//   * The Payments tab is shown only when the Payments feature flag is enabled
-//     (lib/featureFlags.js → isPaymentsEnabled). Hidden in PROD until the backend
-//     rollout completes; the routes themselves are independently guarded.
+//   * The Payments tab is shown only when BOTH gates pass: the global env flag
+//     (lib/featureFlags.js → isPaymentsEnabled) AND the signed-in user's per-user
+//     flag (ProfileContext → featureFlags, evaluated with featureEnabled). Hidden
+//     for everyone in PROD until rollout, and hidden for any user not granted the
+//     flag — with no hint the tab exists. The routes themselves are independently
+//     guarded server- and client-side.
 //
 // Active-route logic:
 //   - '/'        → exact match only
@@ -20,6 +23,8 @@
 
 import { usePathname, useRouter } from 'next/navigation'
 import { isPaymentsEnabled } from '@/lib/featureFlags'
+import { featureEnabled } from '@/lib/features'
+import { useProfile } from '@/lib/profile/ProfileContext'
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
@@ -93,10 +98,15 @@ const TABS = [
 export default function AppNav() {
   const pathname = usePathname()
   const router = useRouter()
+  const { featureFlags } = useProfile()
 
-  // Hide the Payments tab unless its feature flag is enabled. SSR-safe (env-only),
-  // so server and client render the same tab set — no hydration mismatch.
-  const tabs = TABS.filter((tab) => tab.key !== 'payments' || isPaymentsEnabled())
+  // Hide the Payments tab unless BOTH the global env flag and the user's per-user
+  // flag are enabled. featureFlags comes from the shared post-login load
+  // (ProfileContext) and is evaluated with the existing synchronous helper — no
+  // re-query here. While flags are still loading featureFlags is {}, so the tab
+  // stays hidden until positively granted (fail-safe: no hint it exists).
+  const paymentsVisible = isPaymentsEnabled() && featureEnabled(featureFlags, 'payments')
+  const tabs = TABS.filter((tab) => tab.key !== 'payments' || paymentsVisible)
 
   return (
     <>

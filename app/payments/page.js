@@ -13,7 +13,6 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabaseClient'
 import AppShell from '@/components/nav/AppShell'
 import CreatePaymentRecordForm from '@/components/reconciliation/CreatePaymentRecordForm'
 import ReconciliationQueues from '@/components/reconciliation/ReconciliationQueues'
@@ -21,13 +20,16 @@ import PaymentRecordsList from '@/components/reconciliation/PaymentRecordsList'
 import EntitlementReconciliationModal from '@/components/reconciliation/EntitlementReconciliationModal'
 import { Banner } from '@/components/reconciliation/ui'
 import { isPaymentsEnabled } from '@/lib/featureFlags'
+import { featureEnabled } from '@/lib/features'
+import { useProfile } from '@/lib/profile/ProfileContext'
 import PaymentsDisabled from '@/components/payments/PaymentsDisabled'
 
 export default function PaymentRecordsPage() {
   const router = useRouter()
-  const enabled = isPaymentsEnabled()
-  const [session, setSession] = useState(null)
-  const [authLoading, setAuthLoading] = useState(true)
+  const globalOn = isPaymentsEnabled()
+  // Session + per-user feature flags come from the shared post-login load.
+  const { user, featureFlags, loading } = useProfile()
+  const allowed = featureEnabled(featureFlags, 'payments')
 
   // Bumped after any mutation so every data panel re-fetches from the service.
   const [reloadToken, setReloadToken] = useState(0)
@@ -37,21 +39,17 @@ export default function PaymentRecordsPage() {
   const [activeEntitlementId, setActiveEntitlementId] = useState(null)
 
   useEffect(() => {
-    // Skip auth/session work entirely when the feature is disabled — the page
-    // short-circuits to the controlled unavailable view below.
-    if (!enabled) return
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) { router.replace('/login'); return }
-      setSession(data.session)
-      setAuthLoading(false)
-    })
-  }, [router, enabled])
+    // Redirect unauthenticated users to login — but only when the feature is
+    // globally on. When it's off we short-circuit to the unavailable view below
+    // with no auth/work, exactly as before.
+    if (globalOn && !loading && !user) router.replace('/login')
+  }, [globalOn, loading, user, router])
 
-  // Feature-flag guard: render a controlled unavailable page (no AppShell, no
-  // backend calls) when Payments is disabled in this environment.
-  if (!enabled) return <PaymentsDisabled />
+  // Global env kill-switch: controlled unavailable page (no AppShell, no backend
+  // calls), instantly, regardless of auth.
+  if (!globalOn) return <PaymentsDisabled />
 
-  if (authLoading) {
+  if (loading) {
     return (
       <div style={{
         minHeight: '100vh', background: '#0f0f0f',
@@ -63,7 +61,13 @@ export default function PaymentRecordsPage() {
     )
   }
 
-  const ownerId = session.user.id
+  if (!user) return null
+
+  // Per-user gate: a signed-in user without the flag sees exactly the same
+  // unavailable view as when Payments is globally disabled — no hint it exists.
+  if (!allowed) return <PaymentsDisabled />
+
+  const ownerId = user.id
 
   return (
     <AppShell>
@@ -85,7 +89,7 @@ export default function PaymentRecordsPage() {
               <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#f9fafb' }}>
                 Payment Records
               </h1>
-              <p style={{ margin: 0, fontSize: '0.8rem', color: '#6b7280' }}>{session.user.email}</p>
+              <p style={{ margin: 0, fontSize: '0.8rem', color: '#6b7280' }}>{user.email}</p>
             </div>
             <button
               type="button"

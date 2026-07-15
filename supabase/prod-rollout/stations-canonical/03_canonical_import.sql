@@ -84,7 +84,7 @@ VALUES
   (57, 'Tarneit', 'FS57', 'Western 1', '417 Derrimut Rd', 'Tarneit', '3029'),
   (58, 'Point Cook', 'FS58', 'Western 1', '85-93 Dunnings Rd', 'Point Cook', '3030'),
   (59, 'Derrimut', 'FS59', 'Western 1', '337 Fitzgerald Road', 'Derrimut', '3026'),
-  (60, 'VEMTC', 'FS60', 'Northern', '284-290 Hume Highway', 'Craigieburn', '3064'),
+  (60, 'Training Academy', 'FS60', 'Northern', '284-290 Hume Highway', 'Craigieburn', '3064'),
   (61, 'Lara', 'FS61', 'Western 3', '25 Mill Rd', 'Lara', '3212'),
   (62, 'Corio', 'FS62', 'Western 3', '20-32 Birdwood Ave', 'Norlane', '3214'),
   (63, 'Geelong City', 'FS63', 'Western 3', '69 McKillop St', 'Geelong', '3220'),

@@ -17,6 +17,7 @@
 
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { useFY } from '@/lib/fy/FinancialYearContext'
+import { formatFYLabel } from '@/lib/calculations/engine'
 import { calcNormalizedSummary } from '@/lib/reconciliation/reconciliationUtils'
 
 // ─── Compact Stat ─────────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ export default function ReconciliationSummary() {
 
   // CANONICAL: all figures from normalized sub-claim aggregation
   const summary = calcNormalizedSummary(groupedView)
-  const fyLabel = activeFY?.label || ''
+  const fyLabel = activeFY?.label ? formatFYLabel(activeFY.label) : ''
 
   // When nothing has been paid yet, de-emphasise the Paid figure so the eye
   // lands on Outstanding. The value stays visible (not hidden) — just muted.

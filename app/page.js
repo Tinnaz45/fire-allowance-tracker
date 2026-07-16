@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { useRates } from '@/lib/calculations/RatesContext'
 import { useFY } from '@/lib/fy/FinancialYearContext'
+import { formatFYLabel } from '@/lib/calculations/engine'
 import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import { resolveClaimShift, resolveClaimPlatoon } from '@/lib/claims/claimMeta'
 import { resolveOperationalPlatoon } from '@/lib/platoon/resolveOperationalPlatoon'
@@ -358,7 +359,7 @@ function FYSelector() {
           gap: '6px',
         }}
       >
-        {activeFY.label}
+        {formatFYLabel(activeFY.label)}
         <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>▾</span>
       </button>
 
@@ -389,7 +390,7 @@ function FYSelector() {
                 background: fy.id === activeFY.id ? 'rgba(220,38,38,0.1)' : 'transparent',
               }}
             >
-              {fy.label} {fy.id === activeFY.id ? '✓' : ''}
+              {formatFYLabel(fy.label)} {fy.id === activeFY.id ? '✓' : ''}
             </button>
           ))}
 
@@ -416,7 +417,7 @@ function FYSelector() {
                     fontSize: '0.82rem', cursor: creating ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  + {lbl}
+                  + {formatFYLabel(lbl)}
                 </button>
               ))}
             </>
@@ -655,7 +656,7 @@ export default function HomePage() {
                   My Claims
                 </h2>
                 <p style={{ margin: 0, fontSize: '0.8rem', color: '#6b7280' }}>
-                  {activeFY ? activeFY.label : 'All years'} · Recalls · Retain · Standby · M&D · Spoilt · Delayed meals
+                  {activeFY ? formatFYLabel(activeFY.label) : 'All years'} · Recalls · Retain · Standby · M&D · Spoilt · Delayed meals
                 </p>
               </div>
 

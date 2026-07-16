@@ -252,14 +252,12 @@ Immediately:
 3. Watch the build log to completion.
 
 **Expected success:** deployment status `Ready` within ~2 min. No build error.
-GitHub Actions `Build & Deploy Verification` (`.github/workflows/basic.yml`) also
-goes green.
+Vercel is the build and deployment system; a `Ready` deployment is the
+authoritative signal that the build succeeded.
 
 **Failure indicators:**
 - Vercel build fails → triage from build log; if it's a schema-runtime mismatch,
   proceed to Phase 9 (Rollback).
-- Vercel build succeeds but the GA `build` job fails → same node version, same
-  command; treat as a flake and rerun. If it fails twice, escalate.
 
 ---
 

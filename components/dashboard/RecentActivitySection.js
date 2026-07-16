@@ -154,14 +154,28 @@ function SummaryTile({ claimType, date, claim, onEdit }) {
 export default function RecentActivitySection({ onEdit }) {
   const { claims, claimGroups, loading } = useClaims()
 
+  // Groups that still have at least one surviving child claim row. Every child
+  // row of a claim group is loaded into `claims` (keyed by claim_group_id), so
+  // this Set is the authoritative "does this claim still exist" check.
+  //
+  // An orphaned claim_group (all child rows deleted, but the parent group row
+  // left behind) must NOT contribute a date below — otherwise a fully-deleted
+  // claim keeps its tile populated with a stale date even though My Claims
+  // (gated on child rows) correctly shows nothing.
+  const liveGroupIds = new Set(claims.map((c) => c.claim_group_id).filter(Boolean))
+
   // Latest DATE per type: max over the union of editable claim rows (c.date) and
   // parent claim groups (g.incident_date). This is what makes standby/md tiles
   // populate even when their entitlements live outside the prototype `claims`
-  // array. `claims` is newest-first; claimGroups is unordered, so compare dates.
+  // array. Only groups that still have surviving children are considered, so
+  // orphaned groups can never surface a stale date. `claims` is newest-first;
+  // claimGroups is unordered, so compare dates.
   const latestDate = (type) => {
     const dates = [
       ...claims.filter((c) => c.claimType === type).map((c) => c.date),
-      ...claimGroups.filter((g) => g.claim_type === type).map((g) => g.incident_date),
+      ...claimGroups
+        .filter((g) => g.claim_type === type && liveGroupIds.has(g.id))
+        .map((g) => g.incident_date),
     ].filter(Boolean)
     if (dates.length === 0) return null
     return dates.reduce((a, b) => (new Date(b) > new Date(a) ? b : a))

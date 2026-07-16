@@ -21,7 +21,7 @@ import { supabase } from '@/lib/supabaseClient'
 import { useClaims } from '@/lib/claims/ClaimsContext'
 import { useRates } from '@/lib/calculations/RatesContext'
 import { useFY } from '@/lib/fy/FinancialYearContext'
-import { calcTaxSummary, roundMoney } from '@/lib/calculations/engine'
+import { calcTaxSummary, roundMoney, formatFYLabel } from '@/lib/calculations/engine'
 import AppShell from '@/components/nav/AppShell'
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ export default function TaxPage() {
 
   const handleCopy = async () => {
     const lines = [
-      `Tax Summary — ${activeFY?.label || 'All Years'}`,
+      `Tax Summary — ${activeFY ? formatFYLabel(activeFY.label) : 'All Years'}`,
       '',
       `Small Meals: ${summary.smallMealCount} × $${rates.smallMealAllowance.toFixed(2)} = $${summary.smallMealTotal.toFixed(2)}`,
       `Large Meals: ${summary.largeMealCount} × $${rates.largeMealAllowance.toFixed(2)} = $${summary.largeMealTotal.toFixed(2)}`,
@@ -193,12 +193,12 @@ export default function TaxPage() {
   }
 
   const handleDownloadCSV = () => {
-    const csv  = buildCSV(summary, totalMealDollars, activeFY?.label || 'All')
+    const csv  = buildCSV(summary, totalMealDollars, activeFY ? formatFYLabel(activeFY.label) : 'All')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href     = url
-    a.download = `fire-allowance-tax-${activeFY?.label || 'summary'}.csv`
+    a.download = `fire-allowance-tax-${formatFYLabel(activeFY?.label || 'summary').replace(/[^a-z0-9]+/gi, '-')}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -226,7 +226,7 @@ export default function TaxPage() {
             <h1 style={{ margin: '0 0 4px', fontSize: '1.35rem', fontWeight: 700, color: '#f9fafb' }}>
               Tax Return
             </h1>
-            {activeFY && <span style={S.fyBadge}>{activeFY.label}</span>}
+            {activeFY && <span style={S.fyBadge}>{formatFYLabel(activeFY.label)}</span>}
           </div>
           <p style={{ margin: 0, fontSize: '0.82rem', color: '#6b7280' }}>
             ATO meal and travel allowance summary. Excludes payslip-only allowances.
@@ -236,7 +236,7 @@ export default function TaxPage() {
         {fyClaims.length === 0 ? (
           <div style={S.card}>
             <div style={S.empty}>
-              No claims found for {activeFY?.label || 'this financial year'}.
+              No claims found for {activeFY ? formatFYLabel(activeFY.label) : 'this financial year'}.
             </div>
           </div>
         ) : (

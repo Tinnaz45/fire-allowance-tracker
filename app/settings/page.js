@@ -187,13 +187,13 @@ export default function SettingsPage() {
             border: '1px solid rgba(59,130,246,0.2)',
             color: '#93c5fd',
             borderRadius: '10px',
-            padding: '12px 16px',
+            padding: '14px 18px',
             fontSize: '0.82rem',
             lineHeight: 1.5,
           }}>
             <strong>Your personal rates</strong> — these values are used when auto-calculating new claims.
-            Existing claims are never changed when you update these. Review rates annually when your enterprise
-            agreement or ATO rates change.
+            Existing claims are never changed when you update these. Review these rates each year, or whenever
+            your enterprise agreement or ATO rates change.
           </div>
 
           {ratesError && (
@@ -231,7 +231,7 @@ export default function SettingsPage() {
               borderRadius: '16px', padding: '24px',
             }}>
               <h2 style={{ margin: '0 0 20px 0', fontSize: '0.95rem', fontWeight: 700, color: '#f9fafb' }}>
-                Allowance Rates
+                Allowance Rates (Workflow Test)
               </h2>
 
               {ratesLoading ? (

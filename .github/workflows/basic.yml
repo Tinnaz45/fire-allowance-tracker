@@ -2,7 +2,7 @@ name: Build & Deploy Verification
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev, 'claude/**']
 
 jobs:
   build:
@@ -21,6 +21,15 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # `next build` fully evaluates route modules during "Collecting page
+          # data", and lib/supabaseClient.js intentionally fails fast if the
+          # public Supabase env vars are absent. The real values are provided by
+          # Vercel at deploy time; this verification build only needs the client
+          # to construct (no network call happens), so build-time placeholders
+          # are sufficient and keep every compile/type/lint/page-data check active.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
 
   verify:
     runs-on: ubuntu-latest

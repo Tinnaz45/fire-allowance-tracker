@@ -23,7 +23,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { runScreenshotExtraction, ExtractionStateError, resolveExtractionAdapter } from '@/lib/fat/services/payslipExtraction'
 import { SCREENSHOT_BUCKET } from '@/lib/fat/services/payslipUploads'
-import { isPaymentsEnabled } from '@/lib/featureFlags'
+import { hasFeature } from '@/lib/features'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -56,6 +56,16 @@ async function authenticate(req) {
   return { ok: true, userId: data.user.id, token, url, anonKey }
 }
 
+// Per-request fat-schema client carrying the user's JWT → RLS enforces owner-only
+// on every read/write (feature-flag lookup, staging, storage).
+function fatClientForRequest(auth) {
+  return createClient(auth.url, auth.anonKey, {
+    db: { schema: 'fat' },
+    auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${auth.token}` } },
+  })
+}
+
 function rateLimit(userId) {
   const now = Date.now()
   const window = 60_000
@@ -83,16 +93,20 @@ function statusForCode(code) {
 }
 
 export async function POST(req) {
-  // Feature-flag gate (audit P1-5): mirror the Payments UI kill-switch. When
-  // Payments is disabled in this environment the route is unavailable BEFORE any
-  // auth/work — exactly as the /payments pages short-circuit to PaymentsDisabled.
-  if (!isPaymentsEnabled()) {
+  const auth = await authenticate(req)
+  if (!auth.ok) return jsonError(auth.status, auth.code, 'Not authenticated.')
+
+  // Server-authoritative feature gate — the SAME logic as the UI, never trusting
+  // the client. hasFeature() enforces BOTH the global env flag AND this user's
+  // per-user flag (lib/features). A user without access gets the same response as
+  // when Payments is globally disabled — no hint the feature exists. When the
+  // global flag is off, hasFeature short-circuits before any DB query.
+  const client = fatClientForRequest(auth)
+  const allowed = await hasFeature('payments', { userId: auth.userId, client: { fat: client } })
+  if (!allowed) {
     return jsonError(503, 'payments_disabled',
       'Payments is not enabled in this environment.')
   }
-
-  const auth = await authenticate(req)
-  if (!auth.ok) return jsonError(auth.status, auth.code, 'Not authenticated.')
 
   const rl = rateLimit(auth.userId)
   if (!rl.ok) {
@@ -122,13 +136,8 @@ export async function POST(req) {
       'Automatic payslip OCR is not enabled in this environment. Enter the lines with Manual entry, or ask an administrator to configure an OCR provider.')
   }
 
-  // Per-request fat-schema client carrying the user's JWT → RLS enforces owner-only.
-  const client = createClient(auth.url, auth.anonKey, {
-    db: { schema: 'fat' },
-    auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${auth.token}` } },
-  })
-
+  // `client` (per-request fat-schema client carrying the user's JWT) was built
+  // above for the feature gate and is reused here — RLS enforces owner-only.
   // The real adapter needs the image bytes — download them owner-scoped from Storage
   // (the same JWT client; storage RLS pins the user's own '<uid>/' prefix). Bytes
   // and the provider key are handled SERVER-SIDE only.
@@ -152,16 +161,20 @@ export async function POST(req) {
   }
 }
 
-// Capability probe for the UI: is automatic OCR extraction available in this
-// environment? Lets the client hide the "Extract lines" action instead of offering
-// a button that would only ever return 503. No auth required — this reveals only
-// whether a provider is configured (a boolean), never any secret or user data.
-export async function GET() {
-  // When Payments is disabled, the capability probe reports unavailable (P1-5) so
-  // the UI hides the Extract action — consistent with the POST gate above.
-  if (!isPaymentsEnabled()) {
-    return NextResponse.json({ ok: true, available: false }, { status: 200 })
-  }
+// Capability probe for the UI: is automatic OCR extraction available for THIS
+// user in this environment? Lets the client hide the "Extract lines" action instead
+// of offering a button that would only ever return 503. Enforces the SAME feature
+// gate as POST (never trust the client): an unauthenticated caller, or a user
+// without the Payments feature, is reported `available: false` with no hint the
+// feature exists. Reveals only a boolean — never a secret or user data.
+export async function GET(req) {
+  const auth = await authenticate(req)
+  if (!auth.ok) return NextResponse.json({ ok: true, available: false }, { status: 200 })
+
+  const client = fatClientForRequest(auth)
+  const allowed = await hasFeature('payments', { userId: auth.userId, client: { fat: client } })
+  if (!allowed) return NextResponse.json({ ok: true, available: false }, { status: 200 })
+
   return NextResponse.json(
     { ok: true, available: resolveExtractionAdapter() !== null },
     { status: 200 },

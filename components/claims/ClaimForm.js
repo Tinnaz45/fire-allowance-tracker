@@ -18,6 +18,7 @@ import { CLAIM_TYPE_ORDER, CLAIM_TYPE_LABELS } from '@/lib/claims/claimTypes'
 import StationDistanceField from '@/components/distance/StationDistanceField'
 import RecallLegDistanceField from '@/components/distance/RecallLegDistanceField'
 import StandbyDistanceField from '@/components/distance/StandbyDistanceField'
+import MdDistanceField from '@/components/distance/MdDistanceField'
 import ShiftPicker from '@/components/claims/ShiftPicker'
 import PlatoonBanner from '@/components/claims/PlatoonBanner'
 import PlatoonPicker from '@/components/profile/PlatoonPicker'
@@ -565,7 +566,7 @@ function RetainInputs({ values, onChange, date, mealEligibility, retainBreakdown
 
 // ─── Sub-form: Standby ────────────────────────────────────────────────────────
 
-function StandbyInputs({ values, onChange, date, nightMealEligible, profile, userId, stations, onStandbyMeta }) {
+function StandbyInputs({ values, onChange, date, nightMealEligible, profile, profileLoading, userId, stations, onStandbyMeta }) {
   // Rostered station now mirrors the Recall capture UX exactly: an editable
   // StationPicker pre-filled from the profile (with the From Profile / Custom
   // badge + Change workflow), gated to explicit selection. The resolved value
@@ -609,14 +610,31 @@ function StandbyInputs({ values, onChange, date, nightMealEligible, profile, use
         </p>
       </div>
 
-      <StandbyDistanceField
-        userId={userId}
-        rosterStation={rosterStationForLookup}
-        standbyStation={standbyStation}
-        value={values.distKm}
-        onChange={(km) => onChange('distKm', km)}
-        onRoutingMeta={onStandbyMeta}
-      />
+      {isMD ? (
+        // Muster & Dismiss petty-cash km = max(0, Home→Rostered − Home→M&D).
+        // Uses the profile home address as origin for BOTH legs (same source as
+        // Recall). distKm here holds the payable one-way km (no return doubling).
+        <MdDistanceField
+          userId={userId}
+          rosterStation={rosterStationForLookup}
+          mdStation={standbyStation}
+          homeAddress={profile?.homeAddress || ''}
+          profileLoading={profileLoading}
+          value={values.distKm}
+          onChange={(km) => onChange('distKm', km)}
+          onRoutingMeta={onStandbyMeta}
+        />
+      ) : (
+        // Standby (unchanged): rostered↔standby round-trip km drives reimbursement.
+        <StandbyDistanceField
+          userId={userId}
+          rosterStation={rosterStationForLookup}
+          standbyStation={standbyStation}
+          value={values.distKm}
+          onChange={(km) => onChange('distKm', km)}
+          onRoutingMeta={onStandbyMeta}
+        />
+      )}
 
       <div style={FIELD}>
         <label style={LABEL_STYLE}>Shift</label>
@@ -1006,6 +1024,9 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       lines = buildStandbyCalcLines({
         distKm: num(fields.distKm), standbyType: fields.standbyType,
         arrivedTime: fields.arrivedTime, shift: fields.shift,
+        // M&D provenance for the Home→Rostered − Home→M&D breakdown.
+        homeToRosteredKm: standbyTravelMeta?.homeToRosteredKm,
+        homeToMdKm:       standbyTravelMeta?.homeToMdKm,
       }, rates)
     } else if (claimType === 'spoilt') {
       lines = buildSpoiltCalcLines({
@@ -1096,7 +1117,12 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       )
     } else if (claimType === 'standby' || claimType === 'md') {
       calcLines = buildStandbyCalcLines(
-        { distKm: num(fields.distKm), standbyType: fields.standbyType, arrivedTime: fields.arrivedTime, shift: fields.shift },
+        {
+          distKm: num(fields.distKm), standbyType: fields.standbyType,
+          arrivedTime: fields.arrivedTime, shift: fields.shift,
+          homeToRosteredKm: standbyTravelMeta?.homeToRosteredKm,
+          homeToMdKm:       standbyTravelMeta?.homeToMdKm,
+        },
         rates
       )
     } else if (claimType === 'spoilt') {
@@ -1148,6 +1174,15 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
       recallStnId:      stationIdOrNull(fields.recallStn),
       standbyStnId:     stationIdOrNull(fields.standbyStn),
       operationalStnId: stationIdOrNull(fields.operationalStn),
+    }
+
+    // M&D petty-cash provenance: preserve both source distances + the payable
+    // km on the persisted claim (calculation_inputs) so the breakdown, DB and
+    // petty-cash export all reproduce max(0, Home→Rostered − Home→M&D).
+    if (claimType === 'md' && standbyTravelMeta?.mode === 'home_diff') {
+      submitFields.mdHomeToRosteredKm = standbyTravelMeta.homeToRosteredKm ?? null
+      submitFields.mdHomeToMdKm       = standbyTravelMeta.homeToMdKm ?? null
+      submitFields.mdPayableKm        = standbyTravelMeta.payableKm ?? (Number(fields.distKm) || 0)
     }
 
     setSubmitting(true)
@@ -1219,7 +1254,7 @@ export default function ClaimForm({ userId, financialYearId, onSuccess, onCancel
           retainBreakdown={breakdown}
         />
       )}
-      {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} date={date} nightMealEligible={nightMealEligible} profile={profile} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
+      {(claimType === 'standby' || claimType === 'md') && <StandbyInputs values={fields} onChange={handleFieldChange} date={date} nightMealEligible={nightMealEligible} profile={profile} profileLoading={profileLoading} userId={userId} stations={stations} onStandbyMeta={setStandbyTravelMeta} />}
       {(claimType === 'spoilt' || claimType === 'delayed_meal') && (
         <SpoiltInputs values={fields} onChange={handleFieldChange} date={date} claimType={claimType} stations={stations} profile={profile} />
       )}

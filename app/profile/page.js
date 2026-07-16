@@ -92,7 +92,7 @@ export default function ProfilePage() {
              .eq('user_id', session.user.id)
              .maybeSingle(),
           fat.from('stations')
-             .select('id, name, abbreviation')
+             .select('id, name, abbreviation, street_address, suburb, postcode, lat, lng')
              .eq('is_active', true)
              .order('id', { ascending: true }),
           getHomeAddress(session.user.id),
@@ -255,6 +255,22 @@ export default function ProfilePage() {
   const activeStationLabel = stationId
     ? (displayLabelForStation(stationById(stationId, stations) || { id: stationId, name: stationName }) || null)
     : null
+
+  // Full station record for the travel baseline. Carries the stored structured
+  // address + coordinates so geocodeStation can resolve non-standard stations
+  // (e.g. the Training Academy) from their address instead of a name-only query.
+  const matchedStation = stationId ? stations.find((s) => String(s.id) === String(stationId)) : null
+  const baselineStation = stationId
+    ? {
+        id:             parseInt(stationId),
+        name:           matchedStation?.name || stationName,
+        street_address: matchedStation?.street_address ?? null,
+        suburb:         matchedStation?.suburb ?? null,
+        postcode:       matchedStation?.postcode ?? null,
+        lat:            matchedStation?.lat ?? null,
+        lng:            matchedStation?.lng ?? null,
+      }
+    : null
   const validDistance = activeStationLabel && typeof homeDistKm === 'number' && Number.isFinite(homeDistKm) && homeDistKm > 0 ? homeDistKm : null
 
   return (
@@ -404,7 +420,7 @@ export default function ProfilePage() {
 
           <TravelBaselineCard
             userId={session.user.id}
-            station={stationId ? { id: parseInt(stationId), name: stationName } : null}
+            station={baselineStation}
             homeAddress={homeAddress}
             profileLoading={false}
           />

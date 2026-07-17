@@ -16,9 +16,16 @@ type: project
 - **Ordinary work uses a temporary branch** (`feat/…`, `fix/…`, `docs/…`,
   `chore/…`, `task/…`) cut from current `origin/dev`. Do **not** commit ordinary
   work directly to `dev` or `main`.
-- **Merge via a pull request into `dev`** — squash merge preferred. Delete the
-  remote branch (GitHub does this automatically) and the local branch (do this
-  yourself with `git branch -d`).
+- **Merge via a pull request into `dev`** — squash merge preferred.
+- **Post-merge cleanup, in this order** (see [`CLAUDE.md`](../CLAUDE.md) §1):
+  confirm the PR squash-merged → **verify** GitHub deleted the remote source
+  branch (required workflow, not guaranteed; if it still exists, **stop and
+  report** — don't delete it manually or change repo settings) → `git fetch` →
+  checkout `dev` → `git pull --ff-only origin dev` → **prove** the merged changes
+  are in `dev` → **then** delete the local branch with `git branch -d`. Because
+  squash merge rewrites the commit identity, `git branch -d` may refuse; fall back
+  to `git branch -D` **only after** independently proving the changes are in
+  `dev`. GitHub handles the remote branch; you handle the local branch separately.
 - **Never commit, push, or merge to `main` without approval** — `main` is
   production. Explicitly ask Danny in the current conversation before anything
   targets `main`. Production is a separate, approved `dev → main` promotion.

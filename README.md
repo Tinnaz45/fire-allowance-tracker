@@ -126,6 +126,9 @@ source of truth. In short:
   into `dev`** (squash merge preferred). Do not commit ordinary work directly to
   `dev` or `main`.
 - Verify required checks and the **Vercel Preview** on the PR before merging.
+- **After merge, clean up in order:** verify GitHub deleted the remote source
+  branch (stop and report if it didn't), update local `dev`, prove the changes
+  are present, then delete the local branch. See [CLAUDE.md](CLAUDE.md) §1.
 - **Production is a separate, explicitly approved `dev → main` action** — never
   part of ordinary task flow, and never a direct push. See
   [CLAUDE.md](CLAUDE.md) and, for FAT-specific promotion steps,

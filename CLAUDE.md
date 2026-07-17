@@ -40,26 +40,62 @@ behaviour — those safeguards are summarised at the end and must be preserved.
 6. **Verify required checks and the Vercel Preview deployment** for the PR before
    merging. A green Vercel Preview is the authoritative build signal.
 7. **Squash merge is preferred** for temporary branch → `dev`.
-8. **GitHub deletes the remote PR source branch automatically** after merge
-   (auto-delete-head-branch is expected to be enabled on the repository).
-9. **Confirm after merge:**
-   - the PR merged successfully;
-   - the remote source branch was deleted.
-10. **Delete the local source branch separately** — GitHub only deletes the
-    remote branch, not your local copy:
-    ```bash
-    git checkout dev
-    git branch -d <type>/<short-description>
-    ```
-11. **Update local `dev` from `origin/dev`:**
-    ```bash
-    git pull --ff-only origin dev
-    ```
+
+### Post-merge cleanup (order matters)
+
+Do these in order. Do **not** delete the local branch before local `dev` has been
+updated and the changes proven present.
+
+1. **Confirm the PR was squash-merged into `dev`.**
+2. **Confirm GitHub deleted the remote PR source branch.** Automatic deletion of
+   merged PR source branches is the required workflow, but it is not guaranteed —
+   verify it actually happened (e.g. `git ls-remote --heads origin <branch>`
+   returns nothing, or the branch is gone on GitHub). If the remote branch still
+   exists, **stop and report it** — do not delete it manually and do not change
+   repository settings to force it.
+3. **Fetch GitHub:**
+   ```bash
+   git fetch origin --prune
+   ```
+4. **Check out local `dev`:**
+   ```bash
+   git checkout dev
+   ```
+5. **Fast-forward local `dev` from `origin/dev`:**
+   ```bash
+   git pull --ff-only origin dev
+   ```
+6. **Prove the merged changes are present in updated `dev`** before deleting
+   anything — e.g. confirm the squash commit is in `git log`, or that the source
+   branch's changes are contained:
+   ```bash
+   git log --oneline -5 dev
+   git branch --merged dev | grep <type>/<short-description>   # may be empty after squash — see note
+   ```
+7. **Delete the local source branch:**
+   ```bash
+   git branch -d <type>/<short-description>
+   ```
+   - Use `git branch -d` (safe delete) whenever Git accepts it.
+   - Squash merging **rewrites the commit identity** — it collapses the branch's
+     commits into a single new commit on `dev` with a different SHA — so
+     `git branch -d` may **refuse** deletion even though the changes are safely
+     present. Only then, and **only after independently proving** the source
+     branch's changes are contained in updated `dev` (step 6), use
+     `git branch -D <branch>`. Do **not** treat unconditional `git branch -D` as
+     the normal path.
 
 ### Remote vs local branch cleanup
 
-- **Remote** source branch: deleted **automatically by GitHub** on squash merge.
-- **Local** source branch: **you delete it yourself** with `git branch -d`.
+- **Remote** source branch: **GitHub** handles this. Automatic deletion of merged
+  PR source branches is the required workflow, but not guaranteed — **verify**
+  after every merge. If it still exists, stop and report rather than deleting it
+  manually or assuming cleanup completed. Repository settings must not be changed
+  without explicit approval.
+- **Local** source branch: **Claude Code / you** delete this separately, after
+  `dev` is updated and the changes are proven present — `git branch -d`, falling
+  back to `git branch -D` only when squash-rewritten identity blocks the safe
+  delete (see step 7).
 
 These are two separate actions. Confirming the remote branch is gone does **not**
 remove the local branch.
@@ -101,9 +137,9 @@ above.
 | Publish | `<type>/<desc>` | Push; open PR **into `dev`** |
 | Verify | PR | Required checks + Vercel Preview green |
 | Merge | `<type>/<desc>` → `dev` | **Squash merge** (preferred) |
-| Cleanup (remote) | — | GitHub **auto-deletes** the remote source branch |
-| Cleanup (local) | — | **You** `git branch -d` the local source branch |
-| Sync | `dev` | `git pull --ff-only origin dev` |
+| Cleanup (remote) | — | GitHub deletes the remote source branch (required workflow) — **verify** it happened; stop and report if not |
+| Sync | `dev` | Fetch → checkout `dev` → `git pull --ff-only origin dev` → prove changes present |
+| Cleanup (local) | — | **Then** delete local branch: `git branch -d` (fall back to `-D` only after proving changes are in `dev`) |
 | Production | `dev` → `main` | **Separate, explicitly approved** promotion (merge commit) |
 
 ---

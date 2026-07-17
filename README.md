@@ -117,29 +117,22 @@ fire-allowance-tracker/
 
 ## Development workflow
 
-- All work happens on the `dev` branch — never commit directly to `main`
-- After changes: run `npm run build` and fix any errors
-- Only merge `dev → main` when the build is clean
-- Full workflow details: see [docs/WORKFLOW.md](docs/WORKFLOW.md)
+The repository workflow is defined in **[CLAUDE.md](CLAUDE.md)** — the single
+source of truth. In short:
 
----
+- `dev` is the **default development branch**.
+- **Ordinary work uses a temporary branch** (`feat/…`, `fix/…`, `docs/…`) cut
+  from current `origin/dev`, pushed to GitHub, and merged via a **pull request
+  into `dev`** (squash merge preferred). Do not commit ordinary work directly to
+  `dev` or `main`.
+- Verify required checks and the **Vercel Preview** on the PR before merging.
+- **Production is a separate, explicitly approved `dev → main` action** — never
+  part of ordinary task flow, and never a direct push. See
+  [CLAUDE.md](CLAUDE.md) and, for FAT-specific promotion steps,
+  [docs/PROD_ROLLOUT_CHECKLIST.md](docs/PROD_ROLLOUT_CHECKLIST.md).
 
-## Deployment Workflow
-
-| Branch | Purpose |
-|---|---|
-| `dev` | Development and testing — all features land here first |
-| `main` | Production — only receives changes via pull request from `dev` |
-
-**Process:**
-
-1. All features and fixes are committed to `dev`
-2. Push `dev` to trigger a Vercel preview deployment
-3. Test the Vercel preview URL thoroughly
-4. Only after verification: open a pull request from `dev` → `main`
-5. Merge to `main` triggers the production Vercel deployment
-
-**Never push directly to `main`.** Direct pushes are blocked by branch protection.
+See also [docs/WORKFLOW.md](docs/WORKFLOW.md) for the day-to-day build/test and
+Supabase rules.
 
 ---
 

@@ -6,12 +6,24 @@ type: project
 
 # Fire Allowance Tracker — Branch Rules
 
+> **Authority:** the root [`CLAUDE.md`](../CLAUDE.md) is the source of truth for
+> the repository workflow. These rules restate its guardrails for agent use; if
+> they ever diverge, `CLAUDE.md` wins.
+
 ## Strict Rules
 
-- **Never commit to main** — `main` is production-only and protected
-- **Always use `dev` branch** — all development work goes here
-- **Require confirmation before merging to main** — explicitly ask the user before opening or merging any PR targeting `main`
-- **Always verify Vercel preview before merge** — the `dev` Vercel preview must be tested and confirmed working before `dev → main` is merged
+- **`dev` is the default development branch** — production lives on `main`.
+- **Ordinary work uses a temporary branch** (`feat/…`, `fix/…`, `docs/…`,
+  `chore/…`, `task/…`) cut from current `origin/dev`. Do **not** commit ordinary
+  work directly to `dev` or `main`.
+- **Merge via a pull request into `dev`** — squash merge preferred. Delete the
+  remote branch (GitHub does this automatically) and the local branch (do this
+  yourself with `git branch -d`).
+- **Never commit, push, or merge to `main` without approval** — `main` is
+  production. Explicitly ask Danny in the current conversation before anything
+  targets `main`. Production is a separate, approved `dev → main` promotion.
+- **Always verify Vercel Preview before merge** — the PR's Vercel Preview must be
+  tested and confirmed working before merge.
 
 ## Active Branch Safety
 

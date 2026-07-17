@@ -212,43 +212,64 @@ stations from a known-good source, **stop** and unblock seeding first.
 
 ---
 
-## Phase 5 — Merge `dev` → `main` (locally, no push yet)
+## Phase 5 — Prepare the `dev → main` promotion (no promotion yet)
 
-**Goal:** prepare `main` to deploy, but stay reversible until you push.
+**Goal:** confirm `dev` is exactly the state to ship and that it promotes cleanly,
+without yet publishing to `main`.
 
-```powershell
-git checkout main
-git pull --ff-only origin main
-git merge --ff-only dev
-git log --oneline -1                        # expect HEAD = f9d6543 (or current dev HEAD)
-```
+> **Promotion is a separate, explicitly approved `dev → main` GitHub action.**
+> It requires Danny's explicit approval in the current conversation (see
+> [`../CLAUDE.md`](../CLAUDE.md) §2). Do **not** perform a local
+> `git merge` + `git push origin main` as the production path — that is not the
+> documented workflow.
 
-**Stop if:** `--ff-only` rejects the merge. That means `main` has commits not on
-`dev` — investigate before continuing. **Do not** create a merge commit to "fix"
-this; resolve out of band.
+1. Confirm `dev` is the intended state (Phase 0 already did the build + review):
+   ```powershell
+   git fetch origin --prune
+   git log --oneline origin/main..origin/dev   # review every commit that will promote
+   ```
+2. Confirm the promotion will be **fast-forward-clean** — `origin/main` has no
+   commits absent from `origin/dev`:
+   ```powershell
+   git log --oneline origin/dev..origin/main    # expect: no output
+   ```
 
-> No push yet. Vercel only triggers on push to `origin/main`.
+**Stop if:** the second command lists any commit. That means `main` has commits
+not on `dev` — investigate and reconcile out of band before promoting. Do **not**
+force a merge to "fix" this.
+
+> Nothing is published to production in this phase. Vercel only deploys production
+> when `main` is updated by the approved promotion in Phase 6.
 
 ---
 
-## Phase 6 — Deploy (push to `main`)
+## Phase 6 — Promote `dev → main` (explicitly approved)
 
-**Goal:** trigger the Vercel auto-deploy now that PROD DB is ready.
+**Goal:** publish `dev` to production now that PROD DB is ready — via an
+**explicitly approved GitHub `dev → main` promotion**, which triggers the Vercel
+production auto-deploy.
 
 **Go/No-Go Gate 6:** Phases 1–5 all green. PROD DB has `fat.*`. `fat` is in
-Exposed schemas. Local `main` is fast-forwarded to `dev`. Local build passes.
+Exposed schemas. `origin/dev` promotes fast-forward-clean to `main`. Build passes.
+**Danny has given explicit approval in the current conversation to promote to
+`main`.**
 
-If any of the above is **no**, do not push.
+If any of the above is **no**, do not promote.
 
-```powershell
-git push origin main
-```
+**Promotion (approved GitHub action):**
 
-Immediately:
+1. Open a pull request from `dev` into `main` on GitHub, or use the repository's
+   approved `dev → main` promotion. A **merge commit** may be used; **rebase
+   merging is disabled**. Ordinary work never promotes this way — only a verified,
+   approved release.
+2. Merge the approved PR into `main`. GitHub records the promotion; Vercel
+   auto-deploys production from `main`.
+
+Immediately after the promotion merges:
 
 1. Open Vercel Dashboard → fire-allowance-tracker → **Deployments**.
-2. Confirm a new deployment from commit `f9d6543` (or the dev HEAD you pushed) is
-   building against the `main` branch.
+2. Confirm a new deployment from the promoted commit (the `dev` HEAD you shipped)
+   is building against the `main` branch.
 3. Watch the build log to completion.
 
 **Expected success:** deployment status `Ready` within ~2 min. No build error.
@@ -325,20 +346,17 @@ Pick the smallest blast-radius option that resolves the failure.
 ### 9a. App-only rollback (runtime broken, DB fine)
 
 Use when smoke tests fail but the schema/RLS look correct, or when the build
-itself fails after push.
+itself fails after promotion. This is an **emergency** procedure, not the normal
+workflow, and still requires Danny's explicit approval before touching `main`.
 
-```powershell
-git checkout main
-git revert --no-edit HEAD                   # creates a clean revert commit
-git push origin main                        # Vercel auto-deploys the revert
-```
+**Fastest first move — Vercel dashboard:** Deployments → previous green
+deployment → **Promote to Production**. If the production app is visibly broken,
+do this first; it restores service without a Git operation.
 
-Vercel can **also** be rolled back from the dashboard: Deployments → previous
-green deployment → **Promote to Production**. This is faster than the git
-revert and should be the first move if the production app is visibly broken.
-
-After the dashboard promote, still create the git revert so `main` HEAD reflects
-production. Otherwise the next push will re-deploy the broken commit.
+**Then reconcile `main` HEAD** so it reflects production and the next promotion
+does not re-deploy the broken commit. Do this via an approved revert PR into
+`main` (a `git revert` of the offending commit), consistent with the `dev → main`
+approval gate — not an unapproved local direct push.
 
 ### 9b. Database rollback (schema/RLS misconfiguration)
 
@@ -382,8 +400,8 @@ If smoke tests fail with `schema must be one of the following: public, …`:
 | Gate 2 — DDL applied  | `fat-schema.sql` ran with no red errors.                                    |
 | Gate 3 — Exposure     | `fat` listed under **Exposed schemas** and `current_setting` returns it.    |
 | Gate 4 — Validation   | All seven 4a–4g read-only SQL checks pass, stations seeded.                 |
-| Gate 5 — FF merge     | `main` fast-forwards cleanly to `dev` with no merge commit.                 |
-| Gate 6 — Push timing  | Push only **after** Gates 1–5 are green; never the other way round.         |
+| Gate 5 — Promotion prep | `origin/dev` promotes fast-forward-clean to `main` (`origin/dev..origin/main` is empty). |
+| Gate 6 — Promote timing | Promote `dev → main` only **after** Gates 1–5 are green **and** Danny has explicitly approved; never the other way round. |
 | Gate 7 — Smoke tests  | All seven browser flows succeed against PROD.                               |
 
 ---

@@ -6,12 +6,31 @@ type: project
 
 # Fire Allowance Tracker — Branch Rules
 
+> **Authority:** the root [`CLAUDE.md`](../CLAUDE.md) is the source of truth for
+> the repository workflow. These rules restate its guardrails for agent use; if
+> they ever diverge, `CLAUDE.md` wins.
+
 ## Strict Rules
 
-- **Never commit to main** — `main` is production-only and protected
-- **Always use `dev` branch** — all development work goes here
-- **Require confirmation before merging to main** — explicitly ask the user before opening or merging any PR targeting `main`
-- **Always verify Vercel preview before merge** — the `dev` Vercel preview must be tested and confirmed working before `dev → main` is merged
+- **`dev` is the default development branch** — production lives on `main`.
+- **Ordinary work uses a temporary branch** (`feat/…`, `fix/…`, `docs/…`,
+  `chore/…`, `task/…`) cut from current `origin/dev`. Do **not** commit ordinary
+  work directly to `dev` or `main`.
+- **Merge via a pull request into `dev`** — squash merge preferred.
+- **Post-merge cleanup, in this order** (see [`CLAUDE.md`](../CLAUDE.md) §1):
+  confirm the PR squash-merged → **verify** GitHub deleted the remote source
+  branch (required workflow, not guaranteed; if it still exists, **stop and
+  report** — don't delete it manually or change repo settings) → `git fetch` →
+  checkout `dev` → `git pull --ff-only origin dev` → **prove** the merged changes
+  are in `dev` → **then** delete the local branch with `git branch -d`. Because
+  squash merge rewrites the commit identity, `git branch -d` may refuse; fall back
+  to `git branch -D` **only after** independently proving the changes are in
+  `dev`. GitHub handles the remote branch; you handle the local branch separately.
+- **Never commit, push, or merge to `main` without approval** — `main` is
+  production. Explicitly ask Danny in the current conversation before anything
+  targets `main`. Production is a separate, approved `dev → main` promotion.
+- **Always verify Vercel Preview before merge** — the PR's Vercel Preview must be
+  tested and confirmed working before merge.
 
 ## Active Branch Safety
 

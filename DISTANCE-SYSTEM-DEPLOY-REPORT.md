@@ -84,19 +84,25 @@ const row = {
 - State: READY
 - **Does NOT include the `addressCache.js` fix** (not yet pushed)
 
-### To deploy the fix — run `push-fix.bat` in the project root:
+> **Historical note:** this report is a point-in-time snapshot from when the
+> `addressCache.js` fix was still pending push. That fix shipped long ago, and the
+> `push-fix.bat` helper it references has since been **retired**. The current
+> repository workflow is in [`CLAUDE.md`](CLAUDE.md): work on a temporary branch
+> and open a PR into `dev`. The steps below are retained only as a record of what
+> was done at the time.
+
+### To deploy the fix (historical — `push-fix.bat` has been retired):
 ```
-Double-click push-fix.bat in Windows Explorer
-— OR —
-Open terminal in C:\Users\Admin\Apps\fire-allowance-tracker
-Run: push-fix.bat
+Committed lib/distance/addressCache.js and pushed to the dev branch,
+then Vercel auto-deployed. Today, use a temporary branch + PR into dev
+(see CLAUDE.md) instead of a helper script.
 ```
 
-This will:
+This did:
 1. `git add lib/distance/addressCache.js`
 2. `git commit -m "fix(distance): clear confirmed_distance_km on every recalculate"`
 3. `git push origin dev`
-4. Vercel will auto-deploy (typically 2–3 minutes)
+4. Vercel auto-deployed (typically 2–3 minutes)
 
 ---
 

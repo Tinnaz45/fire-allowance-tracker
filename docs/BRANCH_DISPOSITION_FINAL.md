@@ -1,5 +1,13 @@
 # Final branch disposition — 2026-07-15
 
+> **Historical record — not an active instruction.**
+> `origin` now carries only `dev` and `main`. The deletion commands below are
+> retained as a record of what was proposed at the time. They are **not** a
+> template for current work: under the governance in [`CLAUDE.md`](../CLAUDE.md)
+> §3, deleting a merged remote head branch is GitHub's automatic job and you must
+> **never** run `git push --delete` — if a merged head branch survives, stop and
+> report it.
+
 Base: `dev` (tip `15b5e25`). Goal: reduce the repo to **`dev` + `main` only**.
 This report resolves the four remaining unmerged branches. **No branches were
 merged, deleted, or migrated** — this is analysis + a plan only.

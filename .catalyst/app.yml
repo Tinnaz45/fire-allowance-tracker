@@ -1,0 +1,64 @@
+# Catalyst application manifest — Fire Allowance Tracker
+#
+# Machine-readable identity and routing metadata for this application.
+# Every field below is established from evidence inside this repository;
+# fields that could not be established honestly are omitted rather than guessed.
+#
+# Authority: this manifest states WHERE things live (repo, branches, hosting,
+# database, Linear routing). CLAUDE.md states HOW work is done. Where a routing
+# fact appears in both, this manifest is the machine-readable source and
+# CLAUDE.md must agree with it.
+
+schema: catalyst/app@1
+
+app:
+  id: fire-allowance-tracker
+  name: Fire Allowance Tracker
+
+repository:
+  owner: Catalyst-App-Dev
+  name: fire-allowance-tracker
+  url: https://github.com/Catalyst-App-Dev/fire-allowance-tracker
+  visibility: public
+
+# Normal two-branch application: ordinary work lands on `dev` via PR;
+# `main` is production and is reached only by explicitly approved promotion.
+branches:
+  model: dev-main
+  dev: dev
+  production: main
+
+stack:
+  framework: nextjs
+  package_manager: npm
+
+hosting:
+  provider: vercel
+  production_branch: main
+  preview: pull-request
+
+database:
+  provider: supabase
+  # Established from repository evidence, not assumption:
+  #   - lib/supabaseClient.js            → supabase.schema('fat')
+  #   - app/api/payslip/extract/route.js → db: { schema: 'fat' }
+  #   - supabase/fat-schema.sql          → create schema if not exists fat
+  #   - docs/FAT_SCHEMA_ARCHITECTURE.md  → every FAT-owned object lives in `fat`
+  # The string "fire_allowance_tracker" does not appear anywhere in this
+  # repository as a schema reference. The separate `fire_allowance_tracker`
+  # schema observed in PROD is not read or written by this application; its
+  # disposition is tracked in Linear GOV-8 and is out of scope here.
+  schema: fat
+  # DEV and PROD are separate Supabase projects — see CLAUDE.md §7.
+  # The `fat` schema must remain exposed to PostgREST.
+
+linear:
+  team: Applications
+  team_key: APP
+  # Applied to every Issue that owns work in this repository.
+  app_label: Fire Allowance Tracker
+
+instructions:
+  agent: CLAUDE.md
+  rules: .claude/rules.md
+  docs: docs/

@@ -118,17 +118,21 @@ fire-allowance-tracker/
 ## Development workflow
 
 The repository workflow is defined in **[CLAUDE.md](CLAUDE.md)** — the single
-source of truth. In short:
+source of truth. Identity and routing (owner, branches, database schema, Linear
+team) live in the manifest **[.catalyst/app.yml](.catalyst/app.yml)**. In short:
 
-- `dev` is the **default development branch**.
-- **Ordinary work uses a temporary branch** (`feat/…`, `fix/…`, `docs/…`) cut
-  from current `origin/dev`, pushed to GitHub, and merged via a **pull request
-  into `dev`** (squash merge preferred). Do not commit ordinary work directly to
-  `dev` or `main`.
+- **Every branch is owned by a Linear Issue**, classified as either a **Problem**
+  or an **Idea**. No Issue → no branch → no PR.
+- **Ordinary work happens on an issue-owned task branch in an isolated
+  worktree** — `task/<LINEAR-ID>-<short-description>`, cut from current
+  `origin/dev`, pushed to GitHub, and merged via a **pull request with base
+  `dev`** (squash merge preferred). There is **no direct-write path to `dev`** or
+  `main`. The `feat/`, `fix/`, `docs/` and `chore/` prefixes are **retired**.
 - Verify required checks and the **Vercel Preview** on the PR before merging.
-- **After merge, clean up in order:** verify GitHub deleted the remote source
-  branch (stop and report if it didn't), update local `dev`, prove the changes
-  are present, then delete the local branch. See [CLAUDE.md](CLAUDE.md) §1.
+- **After merge, clean up in order:** verify GitHub deleted the remote head
+  branch (stop and report if it didn't — never `git push --delete`), update local
+  `dev`, prove the changes are present, then remove the worktree and delete the
+  local branch. See [CLAUDE.md](CLAUDE.md) §3.
 - **Production is a separate, explicitly approved `dev → main` action** — never
   part of ordinary task flow, and never a direct push. See
   [CLAUDE.md](CLAUDE.md) and, for FAT-specific promotion steps,

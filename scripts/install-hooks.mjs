@@ -2,9 +2,10 @@
 /**
  * install-hooks.mjs - Fire Allowance Tracker
  *
- * Installs git hooks from scripts/hooks/ into .git/hooks/.
+ * Installs git hooks from scripts/hooks/ into the repository's hooks directory.
  * Run automatically via `npm install` (package.json "prepare" script).
- * Safe to re-run; overwrites stale hooks.
+ * Safe to re-run; overwrites stale hooks. Works from the primary checkout and
+ * from a linked worktree (hooks are shared via the common gitdir).
  *
  * Usage:
  *   node scripts/install-hooks.mjs
@@ -12,18 +13,34 @@
  */
 
 import { copyFileSync, chmodSync, existsSync, mkdirSync } from 'fs'
-import { join, dirname } from 'path'
+import { execFileSync } from 'child_process'
+import { join, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 const HOOKS_SRC = join(ROOT, 'scripts', 'hooks')
-const HOOKS_DEST = join(ROOT, '.git', 'hooks')
 
 const HOOKS = ['pre-commit', 'pre-push']
 
-if (!existsSync(join(ROOT, '.git'))) {
-  console.log('install-hooks: not a git repo, skipping.')
+// Ask git where hooks live rather than assuming `.git` is a directory. In a
+// linked worktree `.git` is a *file* pointing at the real gitdir, so a
+// hard-coded `.git/hooks` fails with ENOTDIR and takes `npm install` down with
+// it. `git rev-parse --git-path hooks` resolves to the shared common-dir hooks
+// from both the primary checkout and any worktree, and honours a custom
+// `core.hooksPath`. Isolated worktrees are the default workflow — CLAUDE.md §3.
+let HOOKS_DEST
+try {
+  HOOKS_DEST = resolve(
+    ROOT,
+    execFileSync('git', ['rev-parse', '--git-path', 'hooks'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  )
+} catch {
+  console.log('install-hooks: not a git repo (or git unavailable), skipping.')
   process.exit(0)
 }
 

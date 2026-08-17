@@ -1,0 +1,69 @@
+# Repository-side backstop for the canonical branch naming defined in
+# CLAUDE.md §3 (and CORE_RULES.md §8.2.1.2): every pull request into the
+# integration branch `dev` must come from an Issue-owned task branch named
+#
+#     task/<LINEAR-ID>-<short-description>
+#
+# e.g. task/APP-65-head-branch-ci-gate
+#
+# Documentation alone does not stop a non-conforming branch from merging, so
+# this check is the mechanical gate. It rejects the retired prefixes
+# (docs/, chore/, feat/, fix/), the session-designated `claude/**` form that
+# hosted Claude Code surfaces provision, and malformed `task/...` names.
+name: Head Branch Gate
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-head-branch:
+    name: Validate PR head branch name
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check head branch matches task/<LINEAR-ID>-<short-description>
+        env:
+          # Passed through the environment, never interpolated into the script
+          # body: a branch name is attacker-controllable on fork pull requests.
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+
+          # <LINEAR-ID>        uppercase team key + '-' + issue number (APP-65)
+          # <short-description> one or more lowercase alphanumeric segments
+          #                     joined by single hyphens, and never empty
+          PATTERN='^task/[A-Z][A-Z0-9]*-[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$'
+
+          echo "Head branch: ${HEAD_REF}"
+          echo "Required form: task/<LINEAR-ID>-<short-description>"
+
+          if printf '%s\n' "${HEAD_REF}" | grep -Eq "${PATTERN}"; then
+            echo "PASS: head branch is a canonical Issue-owned task branch."
+            exit 0
+          fi
+
+          echo "::error title=Invalid head branch::'${HEAD_REF}' is not a canonical task branch."
+          cat <<'EOF'
+
+          This pull request targets `dev` from a branch that no Linear Issue owns.
+
+          Required form:  task/<LINEAR-ID>-<short-description>
+          Example:        task/APP-65-head-branch-ci-gate
+
+            - `task/` prefix is mandatory. `docs/`, `chore/`, `feat/` and `fix/`
+              are retired (CLAUDE.md §3), and the `claude/**` branch a hosted
+              session is provisioned on is never the write target.
+            - <LINEAR-ID> is a real Linear identifier: uppercase team key, a
+              hyphen, then the issue number (e.g. APP-65).
+            - <short-description> must be present and non-empty: lowercase
+              alphanumeric words separated by single hyphens.
+
+          Fix: cut the branch again from current origin/dev under the correct
+          name and re-open the pull request against `dev`.
+          EOF
+          exit 1

@@ -124,20 +124,35 @@ the same loop:
    (`git ls-remote --heads origin task/<LINEAR-ID>-<short-description>`). If it
    does, stop and report rather than reusing or force-updating it.
 
-4. **Do the work in that worktree, on that branch.** Commit locally.
+4. **If this session started on a branch it did not choose, ignore that branch.**
+   Hosted Claude Code surfaces provision a container, clone this repository, and check
+   the run out on a session branch of their own naming — `claude/<slug>-<suffix>` —
+   then state it as the one to develop on. It is **never** the write target
+   (`CORE_RULES.md § 8.2.1.1`). Derive the step-3 branch from the owning Linear Issue,
+   create it, and name **both** branches in the run's report so the superseded
+   instruction is visible rather than lost.
 
-5. **Push the task branch:**
+   This repository carries no Catalyst resolver — the plugin lives in
+   `Tinnaz45/governance-system` — so the run derives that branch itself with plain
+   `git`. The absence of the tool is not an exemption (`CORE_RULES.md § 8.2.1.2`).
+   **Never commit or push on the designated branch.** A repository-side head-branch
+   check is a backstop that fires after the work is already committed and pushed on
+   the wrong branch — it is never the mechanism.
+
+5. **Do the work in that worktree, on that branch.** Commit locally.
+
+6. **Push the task branch:**
    ```bash
    git push -u origin task/<LINEAR-ID>-<short-description>
    ```
 
-6. **Open a pull request with base `dev`** — never `main` for ordinary work, and
+7. **Open a pull request with base `dev`** — never `main` for ordinary work, and
    never a direct push to `dev`.
 
-7. **Verify required checks and the Vercel Preview deployment** for the PR before
+8. **Verify required checks and the Vercel Preview deployment** for the PR before
    merging. A green Vercel Preview is the authoritative build signal.
 
-8. **Squash merge is preferred** for task branch → `dev`.
+9. **Squash merge is preferred** for task branch → `dev`.
 
 ### Retired branch prefixes
 

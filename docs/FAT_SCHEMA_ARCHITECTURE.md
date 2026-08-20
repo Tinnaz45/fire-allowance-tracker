@@ -76,6 +76,30 @@ and cannot interfere with each other.
 migration. It remains in place as transitional cross-app debt and will be
 detached separately.
 
+### Legacy `public` objects removed under GOV-89 (DEV)
+
+Five stale Fire Allowance relations that predated the move to the `fat` schema
+were removed from the **DEV** project (`kctctvpobbizhkiqkgqw`):
+
+`public.allowance_breakdowns`, `public.audit_logs`,
+`public.calculation_snapshots`, `public.engine_versions`, `public.shifts`.
+
+None was read or written by FAT runtime — no repository file referenced any of
+them as a relation, and their contents were legacy NSW Ambulance EAPA test rows
+rather than FRV entitlement data. They were dropped in FK-safe order with
+explicit `RESTRICT` (never `CASCADE`); `public.profiles` and every `fat`,
+`mica`, `cab`, `shared` and `auth` object were left untouched. **After this
+cleanup `public` holds exactly one relation in DEV: `public.profiles`.**
+
+The migration, its preflight, validation and full recovery artifacts live in
+[`supabase/dev-cleanup/gov-89-stale-public-objects/`](../supabase/dev-cleanup/gov-89-stale-public-objects/).
+PROD was **not** touched and still carries these objects.
+
+The four enum types those tables used — `public.allowance_line_type`,
+`public.audit_action`, `public.ingestion_source`, `public.shift_status` — were
+outside GOV-89's approved scope and remain in place, now unreferenced. Their
+disposition belongs to a separate Issue.
+
 ## Naming conventions
 
 * All table, column, function, trigger and policy names are `snake_case`.

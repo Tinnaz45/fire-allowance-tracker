@@ -61,6 +61,80 @@ All in the `fat` schema:
 
 RLS is enabled on every FAT table.
 
+## Default privilege hardening (APP-93 / GOV-102)
+
+GOV-102 found that role `postgres` carried default ACLs in `fat` granting
+*future* tables, sequences and functions to `anon`, `authenticated` and
+`service_role` automatically on creation — before any RLS policy existed for
+them. Every FAT table has RLS enabled today, so this was fail-open creation
+semantics rather than a live hole, but it meant a newly created table was
+Data-API-reachable by `anon` for however long it took to add its policy.
+
+[`supabase/canonical/21_harden_default_privileges.sql`](../supabase/canonical/21_harden_default_privileges.sql)
+(APP-93) revokes those default grants for `fat` in **DEV**
+(`kctctvpobbizhkiqkgqw`). It only changes defaults for objects *not yet
+created* — every existing table/sequence/function keeps the grants it already
+has. PROD (`wgcqzamuspuqpedqasbc`) carries the same broad defaults per GOV-102
+but is untouched by this migration; hardening PROD is a separate, explicitly
+approved migration.
+
+**Verified DEV effect of the migration** (see PR evidence for the full probe):
+newly created tables and sequences get *no* grant to `anon`/`authenticated`/
+`service_role` — owner-only, exactly as intended. Newly created functions also
+lose the automatic `anon`/`authenticated`/`service_role` grant. **They do
+not**, however, lose PUBLIC execute — see the next section.
+
+### Known limitation: `ALTER DEFAULT PRIVILEGES` cannot suppress PUBLIC execute here
+
+APP-93 also required that future functions not inherit PUBLIC execute. The
+migration includes `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE ON FUNCTIONS
+FROM PUBLIC` for this, matching the documented PostgreSQL pattern — but
+repeated probing in DEV (multiple fresh functions, multiple schemas including
+a brand-new throwaway schema, both grant/revoke orderings) showed it has
+**no effect** in this Supabase-managed Postgres 17.6 instance: every newly
+created function's initial ACL still includes `PUBLIC=EXECUTE`, regardless of
+default-privilege configuration. Since every role is implicitly a member of
+PUBLIC, this means `anon`/`authenticated` can still call a brand-new `fat`
+function via RPC even after this migration, unless it is stripped per-function
+(step 5 below). Root cause was not fully isolated (it looks like this
+instance's `CREATE FUNCTION` always seeds the initial ACL from PostgreSQL's
+hard-wired function default — owner + PUBLIC execute — rather than fully
+deferring to the stored default-privilege override); a database-wide
+enforcement mechanism (e.g. an event trigger stripping PUBLIC execute on every
+`CREATE FUNCTION` in `fat`) could close this gap for real, but that is a
+bigger, blast-radius-global mechanism and is deliberately left to a follow-up
+governance decision rather than being folded into this migration.
+
+**Until that follow-up exists, step 5 below is not optional** — it is the only
+verified way to keep a new `fat` function off the Data API by default.
+
+### Provisioning new fat objects
+
+Because new objects now start with **no** Data API access (tables/sequences)
+or only owner + PUBLIC access (functions — see limitation above), every new
+table/sequence/function must opt in explicitly, in this order:
+
+1. Create the object.
+2. For a table: `ALTER TABLE fat.<name> ENABLE ROW LEVEL SECURITY;` and add its
+   policy (or policies) — typically `users_manage_own`, mirroring the pattern
+   above.
+3. Only then grant the specific privileges the app actually needs, to the
+   specific roles that need them — never blanket `GRANT ALL`:
+   ```sql
+   grant select, insert, update, delete on fat.<name> to authenticated;
+   grant select, insert, update, delete on fat.<name> to service_role;
+   ```
+4. For a function meant to be called as an RPC, grant execute to the specific
+   role(s) that need it:
+   `grant execute on function fat.<name>(...) to authenticated;` (or
+   `service_role` only, for server-only routines).
+5. **Mandatory for every new function** — immediately revoke PUBLIC execute,
+   since it is not suppressed by default (see limitation above):
+   ```sql
+   revoke execute on function fat.<name>(...) from public;
+   ```
+   Do this in the same migration that creates the function.
+
 ## Public / shared resources used by FAT
 
 | Resource           | Notes                                                                    |

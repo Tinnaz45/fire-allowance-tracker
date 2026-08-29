@@ -84,7 +84,7 @@ newly created tables and sequences get *no* grant to `anon`/`authenticated`/
 lose the automatic `anon`/`authenticated`/`service_role` grant. **They do
 not**, however, lose PUBLIC execute — see the next section.
 
-### Known limitation: `ALTER DEFAULT PRIVILEGES` cannot suppress PUBLIC execute here
+### Resolved: `ALTER DEFAULT PRIVILEGES` cannot suppress PUBLIC execute here — now automatically enforced (APP-103)
 
 APP-93 also required that future functions not inherit PUBLIC execute. The
 migration includes `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE ON FUNCTIONS
@@ -94,25 +94,65 @@ a brand-new throwaway schema, both grant/revoke orderings) showed it has
 **no effect** in this Supabase-managed Postgres 17.6 instance: every newly
 created function's initial ACL still includes `PUBLIC=EXECUTE`, regardless of
 default-privilege configuration. Since every role is implicitly a member of
-PUBLIC, this means `anon`/`authenticated` can still call a brand-new `fat`
-function via RPC even after this migration, unless it is stripped per-function
-(step 5 below). Root cause was not fully isolated (it looks like this
-instance's `CREATE FUNCTION` always seeds the initial ACL from PostgreSQL's
-hard-wired function default — owner + PUBLIC execute — rather than fully
-deferring to the stored default-privilege override); a database-wide
-enforcement mechanism (e.g. an event trigger stripping PUBLIC execute on every
-`CREATE FUNCTION` in `fat`) could close this gap for real, but that is a
-bigger, blast-radius-global mechanism and is deliberately left to a follow-up
-governance decision rather than being folded into this migration.
+PUBLIC, this meant `anon`/`authenticated` could call a brand-new `fat`
+function via RPC unless it was stripped per-function by hand.
 
-**Until that follow-up exists, step 5 below is not optional** — it is the only
-verified way to keep a new `fat` function off the Data API by default.
+APP-103 re-verified and bounded this directly against shared Supabase DEV
+with disposable probes:
+
+* A `fat`-scoped default-privilege entry populated by a **revoke-only**
+  statement never persists a `pg_default_acl` row here (there is nothing to
+  revoke), so a new function's initial ACL is `NULL` and PostgreSQL falls back
+  to its hard-wired default (owner + PUBLIC execute).
+* Populating that same default-privilege slot with an explicit **grant**
+  (e.g. granting execute to `service_role`) *does* persist a `pg_default_acl`
+  row containing no PUBLIC entry — but a function created immediately
+  afterwards still received `PUBLIC=EXECUTE` in its ACL regardless.
+* No event trigger, extension, or other DDL hook already installed on this
+  project explains it — `pg_event_trigger` lists only Supabase's own
+  pg_graphql/pg_cron/pg_net/PostgREST hooks, none of which touch function ACLs
+  for ordinary `CREATE FUNCTION` statements outside their own extensions —
+  and there is no database-wide (schema-less) default-ACL entry for role
+  `postgres` either.
+
+The exact internal reason the schema-scoped default-privilege override does
+not fully replace PostgreSQL's hard-wired function default could not be
+isolated further from SQL alone (it would require inspecting Supabase's
+Postgres build); the finding is bounded to **"no `ALTER DEFAULT PRIVILEGES`
+configuration tried suppresses PUBLIC execute on new `fat` functions here"**
+and accepted as reproducible fact.
+
+What *does* reliably work is a direct, per-function
+`REVOKE EXECUTE ON FUNCTION <name>(...) FROM PUBLIC` issued after creation —
+every existing `fat` function that has had this applied holds no PUBLIC grant
+today. APP-93's gap was that this step was manual and was not applied
+consistently.
+
+**Enforcement (APP-103):** rather than continue to rely on every future
+migration remembering the manual revoke, a `fat`-scoped DDL event trigger
+enforces it automatically —
+[`supabase/canonical/22_enforce_no_public_execute_fat_functions.sql`](../supabase/canonical/22_enforce_no_public_execute_fat_functions.sql),
+applied to DEV. It fires only on the `CREATE FUNCTION` command tag and
+immediately no-ops for any object whose schema is not exactly `fat` — cab,
+mica, `public`, and every other schema in this shared database are
+unaffected, and no existing function's grants are touched, only functions
+created (or replaced) after this migration. Options compared and why an
+event trigger was selected over a repo-only CI check are documented in that
+migration file's header. DEV-only; PROD hardening is a separate, explicitly
+approved migration, matching APP-93's precedent.
+
+**Step 5 below is now automatically enforced** rather than merely mandatory —
+but keep doing it explicitly in new migrations anyway, since the event
+trigger is defense-in-depth for direct-to-DEV changes, not a reason to stop
+writing the revoke where the invariant is meant to live: the migration file
+itself.
 
 ### Provisioning new fat objects
 
 Because new objects now start with **no** Data API access (tables/sequences)
-or only owner + PUBLIC access (functions — see limitation above), every new
-table/sequence/function must opt in explicitly, in this order:
+or owner-only access (functions — PUBLIC execute is stripped automatically as
+of APP-103, see above), every new table/sequence/function must opt in
+explicitly, in this order:
 
 1. Create the object.
 2. For a table: `ALTER TABLE fat.<name> ENABLE ROW LEVEL SECURITY;` and add its
@@ -128,12 +168,15 @@ table/sequence/function must opt in explicitly, in this order:
    role(s) that need it:
    `grant execute on function fat.<name>(...) to authenticated;` (or
    `service_role` only, for server-only routines).
-5. **Mandatory for every new function** — immediately revoke PUBLIC execute,
-   since it is not suppressed by default (see limitation above):
+5. **Still write this explicitly in every new migration** — even though the
+   `fat_enforce_no_public_execute` event trigger (APP-103) now strips it
+   automatically as a backstop:
    ```sql
    revoke execute on function fat.<name>(...) from public;
    ```
-   Do this in the same migration that creates the function.
+   Do this in the same migration that creates the function. Treat the event
+   trigger as defense-in-depth for direct-to-DEV changes, not a reason to
+   drop this line from the governed migration path.
 
 ## Public / shared resources used by FAT
 

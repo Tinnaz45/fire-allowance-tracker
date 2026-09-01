@@ -58,6 +58,13 @@ linear:
   # Applied to every Issue that owns work in this repository.
   app_label: Fire Allowance Tracker
 
+chatgpt:
+  # Declares this app's existing ChatGPT Project identity (APP-110).
+  # governance_mode is deliberately omitted: its absence resolves as LEGACY
+  # until APP-110 post-removal verification passes.
+  project: Fire Allowance Tracker
+  eligible: true
+
 instructions:
   agent: CLAUDE.md
   rules: .claude/rules.md

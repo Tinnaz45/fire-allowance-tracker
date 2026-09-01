@@ -11,9 +11,8 @@
 
 schema: catalyst/app@1
 
-app:
-  id: fire-allowance-tracker
-  name: Fire Allowance Tracker
+id: fire-allowance-tracker
+name: Fire Allowance Tracker
 
 repository:
   owner: Catalyst-App-Dev

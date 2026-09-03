@@ -15,9 +15,9 @@ id: fire-allowance-tracker
 name: Fire Allowance Tracker
 
 repository:
-  owner: Catalyst-App-Dev
+  owner: Tinnaz45
   name: fire-allowance-tracker
-  url: https://github.com/Catalyst-App-Dev/fire-allowance-tracker
+  url: https://github.com/Tinnaz45/fire-allowance-tracker
   visibility: public
 
 # Normal two-branch application: ordinary work lands on `dev` via PR;
